@@ -756,6 +756,15 @@ app.delete("/delete/site_visit/:id", auth(["admin"]), (req, res) => {
     });
 });
 
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "RBD CRM backend is running",
+    time: new Date().toISOString(),
+  });
+});
+
+
 app.listen(PORT, () => {
   console.log(`server running http://127.0.0.1:${PORT}`);
 });
