@@ -113,6 +113,8 @@ export function LeadsTable() {
   const [savedStates, setSavedStates] = useState({});
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+
   const [newLead, setNewLead] = useState({
     name: "",
     mobile: "",
@@ -354,6 +356,14 @@ export function LeadsTable() {
     setShowAddModal(false);
   };
 
+  const openBulkModal = () => {
+    setShowBulkModal(true);
+  };
+
+  const closeBulkModal = () => {
+    setShowBulkModal(false);
+  };
+
   const handleNewLeadChange = (field, value) => {
     setNewLead((prev) => {
       const updated = { ...prev };
@@ -380,6 +390,38 @@ export function LeadsTable() {
 
       return updated;
     });
+  };
+
+  const handleBulkLeadsAdded = (newLeadsArray) => {
+    if (!newLeadsArray || newLeadsArray.length === 0) return;
+
+    setLeads((prev) => {
+      const merged = [...newLeadsArray, ...prev];
+
+      // keep same sort order as initial fetch: newest createdAt first
+      const sorted = [...merged].sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tb - ta;
+      });
+
+      return sorted;
+    });
+
+    setSavedStates((prev) => {
+      const updated = { ...prev };
+      newLeadsArray.forEach((lead) => {
+        if (lead.lead_id != null) {
+          updated[lead.lead_id] = true;
+        }
+      });
+      return updated;
+    });
+
+    setCurrentIndex(0);
+    localStorage.setItem(LAST_INDEX_KEY, "0");
+
+    window.dispatchEvent(new Event("leads-updated"));
   };
 
   const handleAddLeadSubmit = async (e) => {
@@ -499,7 +541,7 @@ export function LeadsTable() {
         </datalist>
 
         <div className="max-w-5xl mx-auto">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-2xl sm:text-3xl font-semibold text-slate-800 mb-2 flex items-center gap-2">
                 <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-500 text-base">
@@ -511,14 +553,24 @@ export function LeadsTable() {
                 View, update and follow up your real estate leads in one place.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAddLeadModal}
-              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 hover:shadow-md transition"
-            >
-              <span className="text-lg leading-none">＋</span>
-              <span>Add Lead</span>
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={openBulkModal}
+                className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 hover:shadow-md transition"
+              >
+                <span className="text-lg leading-none">⬆</span>
+                <span>Bulk Upload</span>
+              </button>
+              <button
+                type="button"
+                onClick={openAddLeadModal}
+                className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 hover:shadow-md transition"
+              >
+                <span className="text-lg leading-none">＋</span>
+                <span>Add Lead</span>
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-center h-64 text-gray-500 text-lg">
@@ -527,198 +579,22 @@ export function LeadsTable() {
         </div>
 
         {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-            <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white border border-slate-200 shadow-2xl">
-              <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-                <h5 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-500 text-sm">
-                    ➕
-                  </span>
-                  Add New Lead
-                </h5>
-                <button
-                  type="button"
-                  className="text-slate-400 hover:text-slate-700 text-xl leading-none"
-                  onClick={closeAddLeadModal}
-                >
-                  <CircleXIcon />
-                </button>
-              </div>
+          <AddLeadModal
+            newLead={newLead}
+            projectOptions={projectOptions}
+            getAssignedToValue={getAssignedToValue}
+            closeAddLeadModal={closeAddLeadModal}
+            handleAddLeadSubmit={handleAddLeadSubmit}
+            handleNewLeadChange={handleNewLeadChange}
+          />
+        )}
 
-              <form
-                onSubmit={handleAddLeadSubmit}
-                className="px-5 py-4 space-y-4"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Name</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.name}
-                      onChange={(e) =>
-                        handleNewLeadChange("name", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">
-                      Mobile <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.mobile}
-                      onChange={(e) =>
-                        handleNewLeadChange("mobile", e.target.value)
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Source</label>
-                    <input
-                      type="text"
-                      list="lead-source-options"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.source}
-                      onChange={(e) =>
-                        handleNewLeadChange("source", e.target.value)
-                      }
-                      placeholder="Select or type source"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Status</label>
-                    <select
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400/80 focus:border-amber-400"
-                      value={newLead.status}
-                      onChange={(e) =>
-                        handleNewLeadChange("status", e.target.value)
-                      }
-                    >
-                      <option value="">Select status</option>
-                      <option value="Details_shared">Details_shared</option>
-                      <option value="NR/SF">NR/SF</option>
-                      <option value="Visit Scheduled">Visit Scheduled</option>
-                      <option value="RNR">RNR</option>
-                      <option value="Site Visited">Site Visited</option>
-                      <option value="Booked">Booked</option>
-                      <option value="Invalid">Invalid</option>
-                      <option value="Not Interested">Not Interested</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Job Role</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.job_role}
-                      onChange={(e) =>
-                        handleNewLeadChange("job_role", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Budget</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.budget}
-                      onChange={(e) =>
-                        handleNewLeadChange("budget", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Project</label>
-                    <select
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.project}
-                      onChange={(e) =>
-                        handleNewLeadChange("project", e.target.value)
-                      }
-                      required
-                    >
-                      <option value="">Select project</option>
-                      {projectOptions.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">
-                      Assigned To
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800"
-                      value={getAssignedToValue(newLead.Assigned_to)}
-                    />
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Auto-filled from your login and cannot be changed.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-slate-500 text-xs">
-                      Call Date &amp; Time
-                    </label>
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/80 focus:border-emerald-400"
-                      value={newLead.dob || ""}
-                      onChange={(e) =>
-                        handleNewLeadChange("dob", e.target.value)
-                      }
-                      disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-700">
-                    Remarks / Notes
-                  </label>
-                  <textarea
-                    rows={3}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                    value={newLead.remarks}
-                    onChange={(e) =>
-                      handleNewLeadChange("remarks", e.target.value)
-                    }
-                    placeholder="Add remarks about this lead..."
-                  />
-                </div>
-
-                <div className="px-1 py-3 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
-                  <button
-                    type="button"
-                    className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-300 hover:bg-slate-100 transition"
-                    onClick={closeAddLeadModal}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-full px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 shadow-sm hover:shadow-md transition"
-                  >
-                    Save Lead
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
+        {showBulkModal && (
+          <BulkLeadUpload
+            existingLeads={leads}
+            onClose={closeBulkModal}
+            onLeadsAdded={handleBulkLeadsAdded}
+          />
         )}
       </div>
     );
@@ -762,7 +638,7 @@ export function LeadsTable() {
       </datalist>
 
       <div className="max-w-5xl mx-auto">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-2xl sm:text-3xl font-semibold text-slate-800 mb-2 flex items-center gap-2">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-500 text-base">
@@ -775,14 +651,24 @@ export function LeadsTable() {
               next.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openAddLeadModal}
-            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 hover:shadow-md transition"
-          >
-            <span className="text-lg leading-none">＋</span>
-            <span>Add Lead</span>
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={openBulkModal}
+              className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 hover:shadow-md transition"
+            >
+              <span className="text-lg leading-none">⬆</span>
+              <span>Bulk Upload</span>
+            </button>
+            <button
+              type="button"
+              onClick={openAddLeadModal}
+              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 hover:shadow-md transition"
+            >
+              <span className="text-lg leading-none">＋</span>
+              <span>Add Lead</span>
+            </button>
+          </div>
         </div>
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
@@ -1091,199 +977,565 @@ export function LeadsTable() {
         </div>
 
         {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-            <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white border border-slate-200 shadow-2xl">
-              <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
-                <h5 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-500 text-sm">
-                    ➕
-                  </span>
-                  Add New Lead
-                </h5>
-                <button
-                  type="button"
-                  className="text-slate-400 hover:text-slate-700 text-xl leading-none"
-                  onClick={closeAddLeadModal}
-                >
-                  <CircleXIcon />
-                </button>
-              </div>
+          <AddLeadModal
+            newLead={newLead}
+            projectOptions={projectOptions}
+            getAssignedToValue={getAssignedToValue}
+            closeAddLeadModal={closeAddLeadModal}
+            handleAddLeadSubmit={handleAddLeadSubmit}
+            handleNewLeadChange={handleNewLeadChange}
+          />
+        )}
 
-              <form
-                onSubmit={handleAddLeadSubmit}
-                className="px-5 py-4 space-y-4"
+        {showBulkModal && (
+          <BulkLeadUpload
+            existingLeads={leads}
+            onClose={closeBulkModal}
+            onLeadsAdded={handleBulkLeadsAdded}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddLeadModal({
+  newLead,
+  projectOptions,
+  getAssignedToValue,
+  closeAddLeadModal,
+  handleAddLeadSubmit,
+  handleNewLeadChange,
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="relative w-full max-w-xl mx-4 rounded-2xl bg-white border border-slate-200 shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h5 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-blue-500 text-sm">
+              ➕
+            </span>
+            Add New Lead
+          </h5>
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-700 text-xl leading-none"
+            onClick={closeAddLeadModal}
+          >
+            <CircleXIcon />
+          </button>
+        </div>
+
+        <form onSubmit={handleAddLeadSubmit} className="px-5 py-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Name</label>
+              <input
+                type="text"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.name}
+                onChange={(e) => handleNewLeadChange("name", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">
+                Mobile <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="tel"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.mobile}
+                onChange={(e) => handleNewLeadChange("mobile", e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Source</label>
+              <input
+                type="text"
+                list="lead-source-options"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.source}
+                onChange={(e) => handleNewLeadChange("source", e.target.value)}
+                placeholder="Select or type source"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Status</label>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400/80 focus:border-amber-400"
+                value={newLead.status}
+                onChange={(e) => handleNewLeadChange("status", e.target.value)}
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Name</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.name}
-                      onChange={(e) =>
-                        handleNewLeadChange("name", e.target.value)
-                      }
-                    />
-                  </div>
+                <option value="">Select status</option>
+                <option value="Details_shared">Details_shared</option>
+                <option value="NR/SF">NR/SF</option>
+                <option value="Visit Scheduled">Visit Scheduled</option>
+                <option value="RNR">RNR</option>
+                <option value="Site Visited">Site Visited</option>
+                <option value="Booked">Booked</option>
+                <option value="Invalid">Invalid</option>
+                <option value="Not Interested">Not Interested</option>
+              </select>
+            </div>
 
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">
-                      Mobile <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.mobile}
-                      onChange={(e) =>
-                        handleNewLeadChange("mobile", e.target.value)
-                      }
-                      required
-                    />
-                  </div>
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Job Role</label>
+              <input
+                type="text"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.job_role}
+                onChange={(e) =>
+                  handleNewLeadChange("job_role", e.target.value)
+                }
+              />
+            </div>
 
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Source</label>
-                    <input
-                      type="text"
-                      list="lead-source-options"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.source}
-                      onChange={(e) =>
-                        handleNewLeadChange("source", e.target.value)
-                      }
-                      placeholder="Select or type source"
-                    />
-                  </div>
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Budget</label>
+              <input
+                type="text"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.budget}
+                onChange={(e) =>
+                  handleNewLeadChange("budget", e.target.value)
+                }
+              />
+            </div>
 
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Status</label>
-                    <select
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400/80 focus:border-amber-400"
-                      value={newLead.status}
-                      onChange={(e) =>
-                        handleNewLeadChange("status", e.target.value)
-                      }
-                    >
-                      <option value="">Select status</option>
-                      <option value="Details_shared">Details_shared</option>
-                      <option value="NR/SF">NR/SF</option>
-                      <option value="Visit Scheduled">Visit Scheduled</option>
-                      <option value="RNR">RNR</option>
-                      <option value="Site Visited">Site Visited</option>
-                      <option value="Booked">Booked</option>
-                      <option value="Invalid">Invalid</option>
-                      <option value="Not Interested">Not Interested</option>
-                    </select>
-                  </div>
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Project</label>
+              <select
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+                value={newLead.project}
+                onChange={(e) => handleNewLeadChange("project", e.target.value)}
+                required
+              >
+                <option value="">Select project</option>
+                {projectOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Job Role</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.job_role}
-                      onChange={(e) =>
-                        handleNewLeadChange("job_role", e.target.value)
-                      }
-                    />
-                  </div>
+            <div className="space-y-1">
+              <label className="text-slate-500 text-xs">Assigned To</label>
+              <input
+                type="text"
+                readOnly
+                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800"
+                value={getAssignedToValue(newLead.Assigned_to)}
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Auto-filled from your login and cannot be changed.
+              </p>
+            </div>
 
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Budget</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.budget}
-                      onChange={(e) =>
-                        handleNewLeadChange("budget", e.target.value)
-                      }
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">Project</label>
-                    <select
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                      value={newLead.project}
-                      onChange={(e) =>
-                        handleNewLeadChange("project", e.target.value)
-                      }
-                      required
-                    >
-                      <option value="">Select project</option>
-                      {projectOptions.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-slate-500 text-xs">
-                      Assigned To
-                    </label>
-                    <input
-                      type="text"
-                      readOnly
-                      className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-800"
-                      value={getAssignedToValue(newLead.Assigned_to)}
-                    />
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      Auto-filled from your login and cannot be changed.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-slate-500 text-xs">
-                      Call Date &amp; Time
-                    </label>
-                    <input
-                      type="datetime-local"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/80 focus:border-emerald-400"
-                      value={newLead.dob || ""}
-                      onChange={(e) =>
-                        handleNewLeadChange("dob", e.target.value)
-                      }
-                      disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-700">
-                    Remarks / Notes
-                  </label>
-                  <textarea
-                    rows={3}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                    value={newLead.remarks}
-                    onChange={(e) =>
-                      handleNewLeadChange("remarks", e.target.value)
-                    }
-                    placeholder="Add remarks about this lead..."
-                  />
-                </div>
-
-                <div className="px-1 py-3 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
-                  <button
-                    type="button"
-                    className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-300 hover:bg-slate-100 transition"
-                    onClick={closeAddLeadModal}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-full px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 shadow-sm hover:shadow-md transition"
-                  >
-                    Save Lead
-                  </button>
-                </div>
-              </form>
+            <div className="space-y-1 sm:col-span-2">
+              <label className="text-slate-500 text-xs">
+                Call Date &amp; Time
+              </label>
+              <input
+                type="datetime-local"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400/80 focus:border-emerald-400"
+                value={newLead.dob || ""}
+                onChange={(e) => handleNewLeadChange("dob", e.target.value)}
+                disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
+              />
             </div>
           </div>
-        )}
+
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-slate-700">
+              Remarks / Notes
+            </label>
+            <textarea
+              rows={3}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
+              value={newLead.remarks}
+              onChange={(e) =>
+                handleNewLeadChange("remarks", e.target.value)
+              }
+              placeholder="Add remarks about this lead..."
+            />
+          </div>
+
+          <div className="px-1 py-3 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
+            <button
+              type="button"
+              className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-300 hover:bg-slate-100 transition"
+              onClick={closeAddLeadModal}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-full px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 shadow-sm hover:shadow-md transition"
+            >
+              Save Lead
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState([]);
+  const [parseErrors, setParseErrors] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const existingMobiles = new Set(
+    (existingLeads || []).map((l) => (l.mobile || "").toString().trim())
+  );
+
+  const expectedHeaders = [
+    "name",
+    "mobile",
+    "source",
+    "status",
+    "job_role",
+    "budget",
+    "project",
+    "remarks",
+    "dob",
+  ];
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setRows([]);
+    setParseErrors([]);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text !== "string") {
+        setParseErrors(["Could not read file content."]);
+        return;
+      }
+
+      const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (lines.length < 2) {
+        setParseErrors(["File has no data rows."]);
+        return;
+      }
+
+      const headerLine = lines[0];
+      const headers = headerLine
+        .split(",")
+        .map((h) => h.trim().toLowerCase());
+
+      const missing = expectedHeaders.filter((h) => !headers.includes(h));
+      if (missing.length > 0) {
+        setParseErrors([
+          `Missing required columns: ${missing.join(
+            ", "
+          )}. Expected header: ${expectedHeaders.join(",")}`,
+        ]);
+        return;
+      }
+
+      const headerIndexMap = {};
+      headers.forEach((h, idx) => {
+        headerIndexMap[h] = idx;
+      });
+
+      const dataRows = [];
+      const localErrors = [];
+
+      lines.slice(1).forEach((line, idx) => {
+        if (!line.trim()) return;
+        const cols = line.split(",");
+        const row = {};
+
+        expectedHeaders.forEach((h) => {
+          const colIdx = headerIndexMap[h];
+          row[h] = cols[colIdx] !== undefined ? cols[colIdx].trim() : "";
+        });
+
+        // basic validation for mobile
+        const { ok, error, normalized } = normalizeAndValidateMobile(row.mobile);
+        if (!ok) {
+          localErrors.push(
+            `Row ${idx + 2}: ${error} (value: "${row.mobile || ""}")`
+          );
+          return;
+        }
+        row.mobile = normalized;
+
+        dataRows.push(row);
+      });
+
+      setRows(dataRows);
+      setParseErrors(localErrors);
+    };
+
+    reader.readAsText(file);
+  };
+
+  const handleUpload = async () => {
+    if (!rows.length) {
+      toast.error("No valid rows to upload");
+      return;
+    }
+
+    setUploading(true);
+    const createdLeads = [];
+    const errors = [];
+
+    const rawUsername = (localStorage.getItem("username") || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+
+    // Keep track of mobiles created during this session to avoid duplicates inside file
+    const createdMobiles = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNumber = i + 2; // considering header
+
+      const mobile = (row.mobile || "").toString().trim();
+      if (existingMobiles.has(mobile) || createdMobiles.has(mobile)) {
+        errors.push(
+          `Row ${rowNumber}: Mobile ${mobile} already exists in CRM or duplicated in file`
+        );
+        continue;
+      }
+
+      let statusToSave = (row.status || "").trim();
+      let dobToSave = (row.dob || "").trim();
+
+      if (
+        statusToSave === "Visit Scheduled" &&
+        (!dobToSave || dobToSave === "")
+      ) {
+        errors.push(
+          `Row ${rowNumber}: status is "Visit Scheduled" but dob is empty`
+        );
+        continue;
+      }
+
+      if (
+        AUTO_24H_STATUSES.includes(statusToSave) &&
+        (!dobToSave || dobToSave === "")
+      ) {
+        dobToSave = getNowPlus24Hours();
+      }
+
+      const payload = {
+        name: row.name || null,
+        mobile,
+        source: row.source || null,
+        status: statusToSave || null,
+        job_role: row.job_role || null,
+        budget: row.budget || null,
+        project: row.project || null,
+        remarks: row.remarks || null,
+        dob: dobToSave || null,
+        Assigned_to: rawUsername || null,
+      };
+
+      try {
+        const res = await api.post("/add-lead", payload);
+        const createdFromServer = res.data;
+
+        const normalizedLead = {
+          ...createdFromServer,
+          status:
+            createdFromServer.status === "Follow Up" ||
+            createdFromServer.status === "Follow-up"
+              ? "Visit Scheduled"
+              : createdFromServer.status,
+          dob: normalizeDobFromBackend(createdFromServer.dob),
+        };
+
+        createdLeads.push(normalizedLead);
+        existingMobiles.add(mobile);
+        createdMobiles.add(mobile);
+      } catch (err) {
+        console.error("Error adding lead (bulk)", {
+          rowNumber,
+          message: err.message,
+          status: err.response?.status,
+          data: err.response?.data,
+        });
+
+        if (err.response?.status === 409) {
+          errors.push(
+            `Row ${rowNumber}: Lead with mobile ${mobile} already exists (409 from server)`
+          );
+        } else {
+          errors.push(
+            `Row ${rowNumber}: Failed to add lead (status ${
+              err.response?.status || "?"
+            })`
+          );
+        }
+      }
+    }
+
+    setUploading(false);
+
+    if (createdLeads.length) {
+      onLeadsAdded(createdLeads);
+      toast.success(
+        `Imported ${createdLeads.length} leads. Skipped ${errors.length}.`
+      );
+    } else {
+      toast.error("No leads were imported");
+    }
+
+    if (errors.length) {
+      setParseErrors(errors.slice(0, 50)); // limit
+    } else {
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="relative w-full max-w-2xl mx-4 rounded-2xl bg-white border border-slate-200 shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <h5 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 text-sm">
+              ⬆
+            </span>
+            Bulk Upload Leads (CSV)
+          </h5>
+          <button
+            type="button"
+            className="text-slate-400 hover:text-slate-700 text-xl leading-none"
+            onClick={onClose}
+          >
+            <CircleXIcon />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 text-xs">
+          <div className="space-y-2">
+            <p className="text-slate-600">
+              Upload a CSV file with the following header (exactly in this
+              order):
+            </p>
+            <pre className="bg-slate-900 text-slate-100 text-[11px] rounded-lg px-3 py-2 overflow-x-auto">
+{`name,mobile,source,status,job_role,budget,project,remarks,dob`}
+            </pre>
+            <ul className="list-disc list-inside text-slate-500 text-[11px] space-y-1">
+              <li>
+                <strong>mobile</strong> is required and must be a valid 10-digit
+                Indian number (can be with +91 / 0).
+              </li>
+              <li>
+                All other fields (<code>name, source, status, job_role, budget, project, remarks, dob</code>) are optional.
+              </li>
+              <li>
+                For status <strong>Visit Scheduled</strong>, <strong>dob</strong> is mandatory.
+              </li>
+              <li>
+                <strong>dob</strong> (Call / Visit Date &amp; Time) format:
+                YYYY-MM-DDTHH:mm (e.g. 2025-12-05T11:30).
+              </li>
+              <li>
+                For status <strong>Visit Scheduled</strong>, dob is mandatory.
+              </li>
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-slate-600 text-xs font-medium">
+              Select CSV file
+            </label>
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleFileChange}
+              className="block w-full text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-medium file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+            />
+            {fileName && (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Selected file:{" "}
+                <span className="font-medium text-slate-700">{fileName}</span>
+              </p>
+            )}
+          </div>
+
+          {rows.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 space-y-1">
+              <p>
+                Parsed rows:{" "}
+                <span className="font-semibold text-emerald-700">
+                  {rows.length}
+                </span>
+              </p>
+              <p>
+                Existing leads in CRM:{" "}
+                <span className="font-semibold text-blue-700">
+                  {existingLeads?.length || 0}
+                </span>
+              </p>
+            </div>
+          )}
+
+          {parseErrors.length > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700 max-h-40 overflow-y-auto">
+              <p className="font-semibold mb-1">
+                Issues found ({parseErrors.length}):
+              </p>
+              <ul className="list-disc list-inside space-y-0.5">
+                {parseErrors.map((err, idx) => (
+                  <li key={idx}>{err}</li>
+                ))}
+              </ul>
+              {parseErrors.length > 50 && (
+                <p className="mt-1 text-[10px] text-red-500">
+                  Showing first 50 errors only.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
+          <button
+            type="button"
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-600 border border-slate-300 hover:bg-slate-100 transition"
+            onClick={onClose}
+            disabled={uploading}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition ${
+              rows.length === 0 || uploading
+                ? "bg-slate-300 text-slate-500 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-500 hover:shadow-md"
+            }`}
+            disabled={rows.length === 0 || uploading}
+            onClick={handleUpload}
+          >
+            {uploading
+              ? "Uploading..."
+              : `Upload ${rows.length} Lead${
+                  rows.length === 1 ? "" : "s"
+                }`}
+          </button>
+        </div>
       </div>
     </div>
   );
