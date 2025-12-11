@@ -1,4 +1,3 @@
-// src/LeadsTable.js
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { CircleXIcon } from "lucide-react";
@@ -83,9 +82,11 @@ const toLocalInputValue = (date) => {
   return `${year}-${month}-${day}T${hours}:${mins}`;
 };
 
-const getNowPlus24Hours = () => {
+// NEW: tomorrow at 09:00 AM local time
+const getTomorrow9AMForInput = () => {
   const d = new Date();
-  d.setHours(d.getHours() + 24);
+  d.setDate(d.getDate() + 1); // tomorrow
+  d.setHours(9, 0, 0, 0); // 09:00:00.000
   return toLocalInputValue(d);
 };
 
@@ -159,7 +160,6 @@ export function LeadsTable() {
             ...lead,
             status,
             dob: normalizeDobFromBackend(lead.dob),
-            // keep Assigned_to as backend value; we'll fallback to username only for display/save
           };
         });
 
@@ -207,7 +207,8 @@ export function LeadsTable() {
           updated.status = value;
 
           if (value === "NR/SF" || value === "RNR") {
-            updated.dob = getNowPlus24Hours();
+            // auto-set to tomorrow 09:00 AM
+            updated.dob = getTomorrow9AMForInput();
           } else if (value === "Visit Scheduled" || value === "Details_shared") {
             updated.dob = "";
           }
@@ -259,11 +260,13 @@ export function LeadsTable() {
       return;
     }
 
+    // If status is in AUTO_24H_STATUSES and dob is empty,
+    // set to tomorrow 09:00 AM
     if (
       AUTO_24H_STATUSES.includes(statusToSave) &&
       (!dobToSave || dobToSave === "")
     ) {
-      dobToSave = getNowPlus24Hours();
+      dobToSave = getTomorrow9AMForInput();
     }
 
     const assignedToFinal = getAssignedToValue(lead.Assigned_to);
@@ -282,7 +285,7 @@ export function LeadsTable() {
       });
 
       if (TRACKED_STATUSES.includes(statusToSave)) {
-        const followUpDate = dobToSave || getNowPlus24Hours();
+        const followUpDate = dobToSave || getTomorrow9AMForInput();
 
         await api.post("/add-follow_up", {
           followup_id: lead.lead_id,
@@ -372,7 +375,8 @@ export function LeadsTable() {
         updated.status = value;
 
         if (value === "NR/SF" || value === "RNR") {
-          updated.dob = getNowPlus24Hours();
+          // auto-set to tomorrow 09:00 AM
+          updated.dob = getTomorrow9AMForInput();
         } else if (value === "Visit Scheduled" || value === "Details_shared") {
           updated.dob = "";
         }
@@ -464,7 +468,7 @@ export function LeadsTable() {
         AUTO_24H_STATUSES.includes(statusToSave) &&
         (!dobToSave || dobToSave === "")
       ) {
-        dobToSave = getNowPlus24Hours();
+        dobToSave = getTomorrow9AMForInput();
       }
 
       const assignedToFinal = getAssignedToValue(newLead.Assigned_to);
@@ -805,8 +809,8 @@ export function LeadsTable() {
                 <p className="text-[11px] text-slate-500 mt-1">
                   {currentLead.status === "NR/SF" ||
                   currentLead.status === "RNR"
-                    ? "Date is auto-set to now + 24 hours and locked."
-                    : "For Visit Scheduled, please select exact date & time."}
+                    ? "Date is auto-set to tomorrow 09:00 AM and locked."
+                    : "For Visit Scheduled, please select exact date & time. For other follow-up statuses, leaving this empty will auto-set to tomorrow 09:00 AM on save."}
                 </p>
               </div>
             </div>
@@ -1147,6 +1151,11 @@ function AddLeadModal({
                 onChange={(e) => handleNewLeadChange("dob", e.target.value)}
                 disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
               />
+              <p className="text-[11px] text-slate-500 mt-1">
+                For NR/SF or RNR, the date will be auto-set to tomorrow 09:00 AM
+                and locked if left empty. For Visit Scheduled, please select
+                exact date &amp; time.
+              </p>
             </div>
           </div>
 
@@ -1267,7 +1276,6 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
           row[h] = cols[colIdx] !== undefined ? cols[colIdx].trim() : "";
         });
 
-        // basic validation for mobile
         const { ok, error, normalized } = normalizeAndValidateMobile(row.mobile);
         if (!ok) {
           localErrors.push(
@@ -1302,12 +1310,11 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
       .trim()
       .toLowerCase();
 
-    // Keep track of mobiles created during this session to avoid duplicates inside file
     const createdMobiles = new Set();
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const rowNumber = i + 2; // considering header
+      const rowNumber = i + 2;
 
       const mobile = (row.mobile || "").toString().trim();
       if (existingMobiles.has(mobile) || createdMobiles.has(mobile)) {
@@ -1334,7 +1341,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
         AUTO_24H_STATUSES.includes(statusToSave) &&
         (!dobToSave || dobToSave === "")
       ) {
-        dobToSave = getNowPlus24Hours();
+        dobToSave = getTomorrow9AMForInput();
       }
 
       const payload = {
@@ -1401,7 +1408,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
     }
 
     if (errors.length) {
-      setParseErrors(errors.slice(0, 50)); // limit
+      setParseErrors(errors.slice(0, 50));
     } else {
       onClose();
     }
@@ -1451,7 +1458,9 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
                 YYYY-MM-DDTHH:mm (e.g. 2025-12-05T11:30).
               </li>
               <li>
-                For status <strong>Visit Scheduled</strong>, dob is mandatory.
+                For auto follow-up statuses (NR/SF, RNR, Details_shared, Site
+                Visited), if dob is empty, it will be auto-set to tomorrow
+                09:00 AM.
               </li>
             </ul>
           </div>

@@ -26,7 +26,6 @@ const FOLLOW_UP_STATUSES = [
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
 const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
-// Only these statuses should trigger auto-transfer
 const TRANSFER_STATUSES = ["NR/SF", "RNR"];
 
 function getConsecutiveSameStatusCount(history, newStatus) {
@@ -42,7 +41,6 @@ function getConsecutiveSameStatusCount(history, newStatus) {
       break;
     }
   }
-  // +1 for the current attempt we are about to save
   return count + 1;
 }
 
@@ -128,9 +126,11 @@ function formatDateTimeDisplay(value) {
   return d.toLocaleString();
 }
 
-function getNowPlus24ForInput() {
+// NEW HELPER: tomorrow at 09:00 AM local time
+function getTomorrow9AMForInput() {
   const d = new Date();
-  d.setHours(d.getHours() + 24);
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
   return toLocalInputValue(d);
 }
 
@@ -172,6 +172,8 @@ export function StatusDashboard() {
       let data = leadsRes.data || [];
       const fuData = fuRes.data || [];
 
+      // Backend already filters by Assigned_to for role "user"
+      // Extra frontend filter is optional; can be kept or removed
       if (role === "user") {
         data = data.filter(
           (lead) =>
@@ -200,7 +202,7 @@ export function StatusDashboard() {
 
       setRows(mapped);
 
-      // include project in snapshot so project-only edits can be saved
+      // Snapshot of original values for change detection
       const snapshot = mapped.map((row) => ({
         lead_id: row.lead_id,
         status: row.status || "",
@@ -285,7 +287,8 @@ export function StatusDashboard() {
           updated.status = value;
 
           if (value === "NR/SF" || value === "RNR") {
-            updated.date = getNowPlus24ForInput();
+            // auto-set to tomorrow 09:00 AM
+            updated.date = getTomorrow9AMForInput();
           } else if (
             value === "Details_shared" ||
             value === "Visit Scheduled" ||
@@ -345,6 +348,7 @@ export function StatusDashboard() {
       const newRemark = (newRemarkByLead[updatedRow.lead_id] || "").trim();
 
       if (newRemark) {
+        // when a new remark is typed, date = now
         updatedRow.date = toLocalInputValue(new Date());
       }
 
@@ -357,12 +361,14 @@ export function StatusDashboard() {
         return;
       }
 
+      // If no new remark, and status is in AUTO_24H_STATUSES and date is empty,
+      // set to tomorrow 09:00 AM
       if (
         !newRemark &&
         AUTO_24H_STATUSES.includes(updatedRow.status) &&
         (!updatedRow.date || updatedRow.date === "")
       ) {
-        updatedRow.date = getNowPlus24ForInput();
+        updatedRow.date = getTomorrow9AMForInput();
       }
 
       const changed = hasChangesComparedToOriginal(updatedRow, newRemark);
@@ -377,8 +383,19 @@ export function StatusDashboard() {
 
       const remarkToSave = newRemark || updatedRow.remarks || "";
 
-      let newAssignedTo = updatedRow.Assigned_to || null;
+      // 🔑 ASSIGNMENT LOGIC
+      // Start from whatever is on the row
+      let newAssignedTo = (updatedRow.Assigned_to || "")
+        .toString()
+        .trim()
+        .toLowerCase() || null;
       let transferredTo = null;
+
+      // For normal users, if Assigned_to is empty/null (old leads),
+      // lock it to the logged-in username so it doesn't disappear.
+      if (role === "user" && !newAssignedTo) {
+        newAssignedTo = username || null;
+      }
 
       // Auto-transfer logic for NR/SF and RNR with 7-attempt threshold + round-robin
       if (
@@ -392,7 +409,7 @@ export function StatusDashboard() {
         );
 
         if (consecutiveCount >= 7) {
-          const currentAssigned = (updatedRow.Assigned_to || "")
+          const currentAssigned = (newAssignedTo || "")
             .toString()
             .trim()
             .toLowerCase();
@@ -401,17 +418,16 @@ export function StatusDashboard() {
           const roundRobinPool = (users || []).filter((u) => {
             const uname =
               u.user_name && u.user_name.toString().trim().toLowerCase();
-            // if role field exists, use only "user" type; otherwise include all
             const roleOk = !u.role || u.role === "user";
             return uname && roleOk;
           });
 
           if (roundRobinPool.length > 1) {
-            const currentIdx = roundRobinPool.findIndex(
-              (u) =>
-                u.user_name &&
-                u.user_name.toString().trim().toLowerCase() === currentAssigned
-            );
+            const currentIdx = roundRobinPool.findIndex((u) => {
+              const uname =
+                u.user_name && u.user_name.toString().trim().toLowerCase();
+              return uname === currentAssigned;
+            });
 
             let nextUser = null;
             if (currentIdx === -1) {
@@ -428,7 +444,10 @@ export function StatusDashboard() {
               nextUser.user_name.toString().trim().toLowerCase() !==
                 currentAssigned
             ) {
-              newAssignedTo = nextUser.user_name;
+              newAssignedTo = nextUser.user_name
+                .toString()
+                .trim()
+                .toLowerCase();
               transferredTo = newAssignedTo;
             }
           }
@@ -525,6 +544,15 @@ export function StatusDashboard() {
       setSavingId(null);
     }
   };
+
+  // Optional: auto-refresh when other pages dispatch "leads-updated"
+  useEffect(() => {
+    const handler = () => {
+      fetchStatusRows();
+    };
+    window.addEventListener("leads-updated", handler);
+    return () => window.removeEventListener("leads-updated", handler);
+  }, []);
 
   const filteredRows = rows.filter((row) => {
     if (statusFilter !== "All") {
@@ -708,7 +736,8 @@ export function StatusDashboard() {
 
   let safeIndex = currentIndex;
   if (safeIndex < 0) safeIndex = 0;
-  if (safeIndex > filteredRows.length - 1) safeIndex = filteredRows.length - 1;
+  if (safeIndex > filteredRows.length - 1)
+    safeIndex = filteredRows.length - 1;
 
   const currentRow = filteredRows[safeIndex];
   const hasPrev = safeIndex > 0;
@@ -1285,10 +1314,10 @@ export function StatusDashboard() {
                     <div className="form-text small">
                       {currentRow.status === "NR/SF" ||
                       currentRow.status === "RNR"
-                        ? "Date is auto-set to now + 24 hours and locked."
+                        ? "Date is auto-set to tomorrow 09:00 AM and locked."
                         : currentRow.status === "Visit Scheduled"
                         ? "For Visit Scheduled, please select exact date & time before saving."
-                        : "For other follow-up statuses, leaving this empty will auto-set now + 24 hours on save."}
+                        : "For other follow-up statuses, leaving this empty will auto-set to tomorrow 09:00 AM on save."}
                     </div>
                   </div>
 
@@ -1436,4 +1465,5 @@ export function StatusDashboard() {
     </div>
   );
 }
+
 export default StatusDashboard;
