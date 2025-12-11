@@ -556,6 +556,7 @@ export function UserDashboard() {
       toast.error("Failed to add lead");
     }
   };
+
   const startEditRow = (row) => {
     const rowId = row.leadKey || row.id;
     setEditingRowId(rowId);
@@ -603,17 +604,16 @@ export function UserDashboard() {
         remarks: editRowData.remarks || null,
         project: editRowData.project || null,
         dob: editRowData.date || null,
+        // keep Assigned_to consistent with backend & user filtering
+        Assigned_to: editRowData.Assigned_to || null,
       };
 
-       
       await api.put(`/edit-lead/${editingRowId}`, payload);
 
       toast.success("Lead updated successfully");
       setModalRows((prev) =>
         prev.map((r) =>
-          (r.leadKey || r.id) === editingRowId
-            ? { ...r, ...editRowData }
-            : r
+          (r.leadKey || r.id) === editingRowId ? { ...r, ...editRowData } : r
         )
       );
 
@@ -761,6 +761,8 @@ export function UserDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Follow-up Alerts Section */}
         <div className="row g-3 mb-4">
           {followUpAlerts.overdue.length === 0 &&
           followUpAlerts.today.length === 0 &&
@@ -800,6 +802,7 @@ export function UserDashboard() {
             </div>
           ) : (
             <>
+              {/* Overdue */}
               <div className="col-12">
                 <div
                   className="card h-100 border-0 shadow-sm"
@@ -891,6 +894,7 @@ export function UserDashboard() {
                 </div>
               </div>
 
+              {/* Today */}
               <div className="col-12">
                 <div
                   className="card h-100 border-0 shadow-sm"
@@ -981,6 +985,8 @@ export function UserDashboard() {
                   </div>
                 </div>
               </div>
+
+              {/* Tomorrow */}
               <div className="col-12">
                 <div
                   className="card h-100 border-0 shadow-sm"
@@ -1074,6 +1080,8 @@ export function UserDashboard() {
             </>
           )}
         </div>
+
+        {/* Summary Cards */}
         <div className="row g-3">
           <div className="col-12 col-md-6 col-xl-3">
             <div
@@ -1081,8 +1089,7 @@ export function UserDashboard() {
               onClick={() => openModal("leads")}
               style={{
                 borderRadius: "1.15rem",
-                background:
-                  "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+                background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
                 minHeight: 180,
                 cursor: "pointer",
                 transition: "transform 0.1s ease, box-shadow 0.1s ease",
@@ -1130,6 +1137,8 @@ export function UserDashboard() {
               </div>
             </div>
           </div>
+
+          {/* Follow-ups */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1185,6 +1194,8 @@ export function UserDashboard() {
               </div>
             </div>
           </div>
+
+          {/* Site Visits */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1240,6 +1251,8 @@ export function UserDashboard() {
               </div>
             </div>
           </div>
+
+          {/* Booked */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1295,215 +1308,221 @@ export function UserDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Modal for rows */}
         {modalOpen && (
-        <>
-          <div
-            className="modal fade show"
-            style={{
-              display: "block",
-              backgroundColor: "rgba(15,23,42,0.45)",
-            }}
-          >
+          <>
             <div
-              className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"
-              style={{ maxWidth: "1100px", width: "95vw" }}
+              className="modal fade show"
+              style={{
+                display: "block",
+                backgroundColor: "rgba(15,23,42,0.45)",
+              }}
             >
               <div
-                className="modal-content border-0 shadow-lg rounded-3"
-                style={{
-                  maxHeight: "90vh",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
+                className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"
+                style={{ maxWidth: "1100px", width: "95vw" }}
               >
-                <div className="modal-header bg-light border-bottom">
-                  <h5 className="modal-title fw-semibold">{modalTitle}</h5>
-                  <button
-                    type="button"
-                    className="btn-close"
-                    onClick={closeModal}
-                  />
-                </div>
                 <div
-                  className="modal-body"
+                  className="modal-content border-0 shadow-lg rounded-3"
                   style={{
-                    flex: "1 1 auto",
-                    overflowY: "auto",
-                    padding: "0.75rem",
+                    maxHeight: "90vh",
+                    display: "flex",
+                    flexDirection: "column",
                   }}
                 >
-                  {modalRows.length === 0 ? (
-                    <div className="p-4 text-center text-muted small">
-                      No records available.
-                    </div>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="table table-sm table-hover mb-0 align-middle">
-                        <thead className="table-light">
-                          <tr className="small text-muted">
-                            <th style={{ width: "14%" }}>Mobile</th>
-                            <th style={{ width: "16%" }}>Name</th>
-                            <th style={{ width: "16%" }}>Project</th>
-                            <th style={{ width: "14%" }}>Status</th>
-                            <th style={{ width: "24%" }}>Remarks</th>
-                            <th style={{ width: "18%" }}>Date &amp; Time</th>
-                            <th style={{ width: "18%" }}>Assigned to</th>
-                            <th style={{ width: "12%" }}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {modalRows.map((row, idx) => {
-                            const rowKey = row.leadKey || row.id;
-                            const isEditing =
-                              editingRowId &&
-                              editingRowId === rowKey &&
-                              editRowData;
+                  <div className="modal-header bg-light border-bottom">
+                    <h5 className="modal-title fw-semibold">{modalTitle}</h5>
+                    <button
+                      type="button"
+                      className="btn-close"
+                      onClick={closeModal}
+                    />
+                  </div>
+                  <div
+                    className="modal-body"
+                    style={{
+                      flex: "1 1 auto",
+                      overflowY: "auto",
+                      padding: "0.75rem",
+                    }}
+                  >
+                    {modalRows.length === 0 ? (
+                      <div className="p-4 text-center text-muted small">
+                        No records available.
+                      </div>
+                    ) : (
+                      <div className="table-responsive">
+                        <table className="table table-sm table-hover mb-0 align-middle">
+                          <thead className="table-light">
+                            <tr className="small text-muted">
+                              <th style={{ width: "14%" }}>Mobile</th>
+                              <th style={{ width: "16%" }}>Name</th>
+                              <th style={{ width: "16%" }}>Project</th>
+                              <th style={{ width: "14%" }}>Status</th>
+                              <th style={{ width: "24%" }}>Remarks</th>
+                              <th style={{ width: "18%" }}>
+                                Date &amp; Time
+                              </th>
+                              <th style={{ width: "18%" }}>Assigned to</th>
+                              <th style={{ width: "12%" }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {modalRows.map((row, idx) => {
+                              const rowKey = row.leadKey || row.id;
+                              const isEditing =
+                                editingRowId &&
+                                editingRowId === rowKey &&
+                                editRowData;
 
-                            return (
-                              <tr
-                                key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
-                              >
-                                <td className="fw-semibold text-primary">
-                                  {row.mobile || "—"}
-                                </td>
-                                <td>{row.name || "—"}</td>
-                                <td>
-                                  {isEditing ? (
-                                    <input
-                                      type="text"
-                                      className="form-control form-control-sm"
-                                      value={editRowData.project || ""}
-                                      onChange={(e) =>
-                                        handleEditRowChange(
-                                          "project",
-                                          e.target.value
-                                        )
-                                      }
-                                    />
-                                  ) : (
-                                    row.project || "—"
-                                  )}
-                                </td>
-                                <td>
-                                  {isEditing ? (
-                                    <select
-                                      className="form-select form-select-sm"
-                                      value={editRowData.status || ""}
-                                      onChange={(e) =>
-                                        handleEditRowChange(
-                                          "status",
-                                          e.target.value
-                                        )
-                                      }
-                                    >
-                                      <option value="">Select status</option>
-                                      <option value="Details_shared">
-                                        Details_shared
-                                      </option>
-                                      <option value="NR/SF">NR/SF</option>
-                                      <option value="Visit Scheduled">
-                                        Visit Scheduled
-                                      </option>
-                                      <option value="RNR">RNR</option>
-                                      <option value="Site Visited">
-                                        Site Visited
-                                      </option>
-                                      <option value="Booked">Booked</option>
-                                      <option value="Invalid">Invalid</option>
-                                      <option value="Not Interested">
-                                        Not Interested
-                                      </option>
-                                    </select>
-                                  ) : (
+                              return (
+                                <tr
+                                  key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
+                                >
+                                  <td className="fw-semibold text-primary">
+                                    {row.mobile || "—"}
+                                  </td>
+                                  <td>{row.name || "—"}</td>
+                                  <td>
+                                    {isEditing ? (
+                                      <input
+                                        type="text"
+                                        className="form-control form-control-sm"
+                                        value={editRowData.project || ""}
+                                        onChange={(e) =>
+                                          handleEditRowChange(
+                                            "project",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                    ) : (
+                                      row.project || "—"
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isEditing ? (
+                                      <select
+                                        className="form-select form-select-sm"
+                                        value={editRowData.status || ""}
+                                        onChange={(e) =>
+                                          handleEditRowChange(
+                                            "status",
+                                            e.target.value
+                                          )
+                                        }
+                                      >
+                                        <option value="">
+                                          Select status
+                                        </option>
+                                        <option value="Details_shared">
+                                          Details_shared
+                                        </option>
+                                        <option value="NR/SF">NR/SF</option>
+                                        <option value="Visit Scheduled">
+                                          Visit Scheduled
+                                        </option>
+                                        <option value="RNR">RNR</option>
+                                        <option value="Site Visited">
+                                          Site Visited
+                                        </option>
+                                        <option value="Booked">Booked</option>
+                                        <option value="Invalid">Invalid</option>
+                                        <option value="Not Interested">
+                                          Not Interested
+                                        </option>
+                                      </select>
+                                    ) : (
+                                      <span className="small text-dark">
+                                        {row.status || "—"}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isEditing ? (
+                                      <textarea
+                                        rows={2}
+                                        className="form-control form-control-sm"
+                                        value={editRowData.remarks || ""}
+                                        onChange={(e) =>
+                                          handleEditRowChange(
+                                            "remarks",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                    ) : (
+                                      <span className="small text-muted">
+                                        {row.remarks || "—"}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {isEditing ? (
+                                      <input
+                                        type="datetime-local"
+                                        className="form-control form-control-sm"
+                                        value={editRowData.date || ""}
+                                        onChange={(e) =>
+                                          handleEditRowChange(
+                                            "date",
+                                            e.target.value
+                                          )
+                                        }
+                                        disabled={HARD_LOCK_STATUSES.includes(
+                                          editRowData.status
+                                        )}
+                                      />
+                                    ) : (
+                                      <span className="small fw-semibold">
+                                        {row.date
+                                          ? formatDateTime(row.date)
+                                          : "—"}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td>
                                     <span className="small text-dark">
-                                      {row.status || "—"}
+                                      {row.Assigned_to || "—"}
                                     </span>
-                                  )}
-                                </td>
-                                <td>
-                                  {isEditing ? (
-                                    <textarea
-                                      rows={2}
-                                      className="form-control form-control-sm"
-                                      value={editRowData.remarks || ""}
-                                      onChange={(e) =>
-                                        handleEditRowChange(
-                                          "remarks",
-                                          e.target.value
-                                        )
-                                      }
-                                    />
-                                  ) : (
-                                    <span className="small text-muted">
-                                      {row.remarks || "—"}
-                                    </span>
-                                  )}
-                                </td>
-                                <td>
-                                  {isEditing ? (
-                                    <input
-                                      type="datetime-local"
-                                      className="form-control form-control-sm"
-                                      value={editRowData.date || ""}
-                                      onChange={(e) =>
-                                        handleEditRowChange(
-                                          "date",
-                                          e.target.value
-                                        )
-                                      }
-                                      disabled={HARD_LOCK_STATUSES.includes(
-                                        editRowData.status
-                                      )}
-                                    />
-                                  ) : (
-                                    <span className="small fw-semibold">
-                                      {row.date
-                                        ? formatDateTime(row.date)
-                                        : "—"}
-                                    </span>
-                                  )}
-                                </td>
-                                <td>
-                                  <span className="small text-dark">
-                                    {row.Assigned_to || "—"}
-                                  </span>
-                                </td>
-                                <td>
-                                  {isEditing ? (
-                                    <div className="d-flex flex-column gap-1">
+                                  </td>
+                                  <td>
+                                    {isEditing ? (
+                                      <div className="d-flex flex-column gap-1">
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-success"
+                                          onClick={handleSaveEditRow}
+                                        >
+                                          Save
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-outline-secondary"
+                                          onClick={cancelEditRow}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : (
                                       <button
                                         type="button"
-                                        className="btn btn-sm btn-success"
-                                        onClick={handleSaveEditRow}
+                                        className="btn btn-sm btn-outline-primary"
+                                        onClick={() => startEditRow(row)}
                                       >
-                                        Save
+                                        Edit
                                       </button>
-                                      <button
-                                        type="button"
-                                        className="btn btn-sm btn-outline-secondary"
-                                        onClick={cancelEditRow}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="btn btn-sm btn-outline-primary"
-                                      onClick={() => startEditRow(row)}
-                                    >
-                                      Edit
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                   <div className="modal-footer bg-light border-top">
                     <div className="me-auto small text-muted">
                       Showing <strong>{modalRows.length}</strong> record(s)
@@ -1527,6 +1546,8 @@ export function UserDashboard() {
             />
           </>
         )}
+
+        {/* Add Lead Modal */}
         {showAddModal && (
           <div className="fixed inset-0 z-50 d-flex align-items-center justify-content-center bg-black bg-opacity-25">
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>

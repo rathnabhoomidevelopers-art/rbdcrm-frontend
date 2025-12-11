@@ -385,26 +385,38 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
+/**
+ * 🔧 UPDATED: /edit-lead
+ * - Now does TRUE PARTIAL UPDATE
+ * - Does NOT overwrite Assigned_to (or other fields) unless they are sent in req.body
+ * - Fixes the bug where leads disappear from user dashboard after editing
+ */
 app.put("/edit-lead/:id", auth(["admin", "user"]), (req, res) => {
   const leadId = req.params.id;
-  const assignedRaw = req.body.Assigned_to || null;
 
-  const update = {
-    name: req.body.name || null,
-    source: req.body.source || null,
-    status: req.body.status || null,
-    job_role: req.body.job_role || null,
-    budget: req.body.budget || null,
-    project: req.body.project || null,
-    remarks: req.body.remarks || null,
-    dob: req.body.dob ? new Date(req.body.dob) : null,
-    Assigned_to: assignedRaw
+  // Build update object only with fields that are actually present in req.body
+  const update = {};
+
+  if ("name" in req.body) update.name = req.body.name || null;
+  if ("source" in req.body) update.source = req.body.source || null;
+  if ("status" in req.body) update.status = req.body.status || null;
+  if ("job_role" in req.body) update.job_role = req.body.job_role || null;
+  if ("budget" in req.body) update.budget = req.body.budget || null;
+  if ("project" in req.body) update.project = req.body.project || null;
+  if ("remarks" in req.body) update.remarks = req.body.remarks || null;
+  if ("dob" in req.body) {
+    update.dob = req.body.dob ? new Date(req.body.dob) : null;
+  }
+
+  // Only touch Assigned_to if it is explicitly provided
+  if ("Assigned_to" in req.body) {
+    const assignedRaw = req.body.Assigned_to;
+    update.Assigned_to = assignedRaw
       ? assignedRaw.toString().trim().toLowerCase()
-      : null,
-  };
+      : null;
+  }
 
   const orFilters = [];
-
   orFilters.push({ lead_id: leadId });
 
   const asNumber = Number(leadId);
@@ -415,6 +427,9 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), (req, res) => {
   if (ObjectId.isValid(leadId)) {
     orFilters.push({ _id: new ObjectId(leadId) });
   }
+
+  console.log("edit-lead update object:", update);
+  console.log("edit-lead filters:", orFilters);
 
   mongoClient
     .connect(connectionString)
