@@ -12,6 +12,16 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "8h";
 const PORT = process.env.PORT || 3000;
 
+// These match the frontend logic
+const TRACKED_STATUSES = [
+  "Visit Scheduled",
+  "NR/SF",
+  "RNR",
+  "Details_shared",
+  "Site Visited",
+  "Booked",
+];
+
 const logRequest = (req, res, next) => {
   console.log(
     `${new Date().toLocaleString()} Request made to ${req.method} ${req.originalUrl}`
@@ -311,11 +321,14 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
     const leadsCol = database.collection("leads");
+    const followUpsCol = database.collection("follow-ups");
+
     const existing = await leadsCol.findOne({ mobile });
     if (existing) {
       return res.status(409).json({
         message: "Lead with this mobile number already exists",
-        lead_id: existing.lead_id || (existing._id ? existing._id.toString() : null),
+        lead_id:
+          existing.lead_id || (existing._id ? existing._id.toString() : null),
       });
     }
 
@@ -337,8 +350,30 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     };
 
     await leadsCol.insertOne(lead);
-
     console.log("Lead added successfully!..");
+
+    // NEW: auto-create follow-up if status is tracked (same rule as frontend)
+    if (lead.status && TRACKED_STATUSES.includes(lead.status)) {
+      const followUpDate = lead.dob || new Date();
+
+      const follow_up = {
+        followup_id: lead.lead_id,
+        date: followUpDate,
+        name: lead.name || null,
+        mobile: lead.mobile ? parseInt(lead.mobile, 10) : null,
+        source: lead.source || null,
+        status: lead.status || null,
+        job_role: lead.job_role || null,
+        budget: lead.budget || null,
+        project: lead.project || null,
+        remarks: lead.remarks || null,
+        createdAt: new Date(),
+      };
+
+      await followUpsCol.insertOne(follow_up);
+      console.log("Auto follow-up created for lead:", lead.lead_id);
+    }
+
     return res.status(201).json(lead);
   } catch (err) {
     console.error("DB error on add-lead", err);
@@ -763,7 +798,6 @@ app.get("/", (req, res) => {
     time: new Date().toISOString(),
   });
 });
-
 
 app.listen(PORT, () => {
   console.log(`server running http://127.0.0.1:${PORT}`);
