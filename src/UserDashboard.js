@@ -113,7 +113,7 @@ export function UserDashboard() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalRows, setModalRows] = useState([]);
 
-  // ✅ NEW: Remember which modal "container" is open so we can rebuild after edits
+  // ✅ Remember which modal "container" is open so we can rebuild after edits
   const [modalContext, setModalContext] = useState(null);
   // modalContext:
   // { kind: "summary", type: "leads" | "followups" | "sitevisits" | "booked" }
@@ -323,7 +323,7 @@ export function UserDashboard() {
   const todayUserGroups = buildUserStatusGroups(followUpAlerts.today);
   const tomorrowUserGroups = buildUserStatusGroups(followUpAlerts.tomorrow);
 
-  // ✅ NEW: Rebuild current open modal based on latest data + modalContext
+  // ✅ Rebuild current open modal based on latest data + modalContext
   const rebuildModalFromContext = () => {
     if (!modalOpen || !modalContext) return;
 
@@ -345,6 +345,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
+            verification_call: !!l.verification_call, // ✅ NEW
           }))
         );
         return;
@@ -373,6 +374,7 @@ export function UserDashboard() {
               remarks: fu.remarks || (lead && lead.remarks) || "",
               Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
               project: fu.project || (lead && lead.project) || "",
+              verification_call: !!(lead && lead.verification_call), // ✅ NEW
             };
           })
         );
@@ -396,6 +398,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
+            verification_call: !!l.verification_call, // ✅ NEW
           }))
         );
         return;
@@ -416,6 +419,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
+            verification_call: !!l.verification_call, // ✅ NEW
           }))
         );
         return;
@@ -452,6 +456,7 @@ export function UserDashboard() {
           remarks: fu.remarks || (lead && lead.remarks) || "",
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
+          verification_call: !!(lead && lead.verification_call), // ✅ NEW
         };
       });
 
@@ -460,7 +465,7 @@ export function UserDashboard() {
     }
   };
 
-  // ✅ Auto-rebuild open modal whenever data updates (so rows move out correctly)
+  // ✅ Auto-rebuild open modal whenever data updates
   useEffect(() => {
     if (!modalOpen || !modalContext) return;
     rebuildModalFromContext();
@@ -475,7 +480,7 @@ export function UserDashboard() {
     followUpAlerts.tomorrow,
   ]);
 
-  // Common modal opener for summary cards (for BOTH admin & user)
+  // Common modal opener for summary cards
   const openModal = (type) => {
     setModalContext({ kind: "summary", type });
 
@@ -495,6 +500,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
+        verification_call: !!l.verification_call, // ✅ NEW
       }));
     } else if (type === "followups") {
       title = "Follow-Up Leads";
@@ -518,6 +524,7 @@ export function UserDashboard() {
           remarks: fu.remarks || (lead && lead.remarks) || "",
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
+          verification_call: !!(lead && lead.verification_call), // ✅ NEW
         };
       });
     } else if (type === "sitevisits") {
@@ -536,6 +543,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
+        verification_call: !!l.verification_call, // ✅ NEW
       }));
     } else if (type === "booked") {
       title = "Booked Leads";
@@ -551,6 +559,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
+        verification_call: !!l.verification_call, // ✅ NEW
       }));
     }
 
@@ -561,7 +570,7 @@ export function UserDashboard() {
     setEditRowData(null);
   };
 
-  // Group modal (Overdue / Today / Tomorrow) – for BOTH admin & user
+  // Group modal (Overdue / Today / Tomorrow)
   const openGroupModal = (bucketLabel, assignedTo, status, items) => {
     setModalContext({ kind: "group", bucketLabel, assignedTo, status });
 
@@ -584,6 +593,7 @@ export function UserDashboard() {
         remarks: fu.remarks || (lead && lead.remarks) || "",
         Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
         project: fu.project || (lead && lead.project) || "",
+        verification_call: !!(lead && lead.verification_call), // ✅ NEW
       };
     });
 
@@ -600,7 +610,7 @@ export function UserDashboard() {
     setModalTitle("");
     setEditingRowId(null);
     setEditRowData(null);
-    setModalContext(null); // ✅ reset context
+    setModalContext(null);
   };
 
   const openAddLeadModal = () => {
@@ -619,7 +629,7 @@ export function UserDashboard() {
     setShowAddModal(true);
   };
 
-  const setShowAddLeadModal = setShowAddModal; // alias
+  const setShowAddLeadModal = setShowAddModal;
 
   const closeAddLeadModal = () => {
     setShowAddLeadModal(false);
@@ -685,7 +695,10 @@ export function UserDashboard() {
         return;
       }
 
-      if (AUTO_24H_STATUSES.includes(statusToSave) && (!dobToSave || dobToSave === "")) {
+      if (
+        AUTO_24H_STATUSES.includes(statusToSave) &&
+        (!dobToSave || dobToSave === "")
+      ) {
         dobToSave = getNowPlus24Hours();
       }
 
@@ -738,7 +751,10 @@ export function UserDashboard() {
       const next = { ...prev, [field]: value };
 
       if (field === "status") {
-        if (AUTO_24H_STATUSES.includes(value) && (!prev.date || prev.date === "")) {
+        if (
+          AUTO_24H_STATUSES.includes(value) &&
+          (!prev.date || prev.date === "")
+        ) {
           next.date = getNowPlus24Hours();
         }
       }
@@ -765,17 +781,23 @@ export function UserDashboard() {
         Assigned_to: editRowData.Assigned_to || null,
       };
 
-      await api.put(`/edit-lead/${editingRowId}`, payload);
+      const res = await api.put(`/edit-lead/${editingRowId}`, payload);
 
       toast.success("Lead updated successfully");
 
-      // ✅ Don't patch modalRows; refresh and rebuild so it moves out of container correctly
+      // backend may transfer; show toast
+      if (res?.data?.transferredTo) {
+        toast.success(
+          `Lead transferred to ${res.data.transferredTo} (Verification Call)`,
+          { duration: 3500, position: "top-right" }
+        );
+      }
+
       cancelEditRow();
 
       window.dispatchEvent(new Event("leads-updated"));
       await fetchStats({ showFullScreenLoader: false });
 
-      // rebuild open modal immediately (useEffect will also keep it synced)
       rebuildModalFromContext();
     } catch (err) {
       console.error("Error updating lead", {
@@ -1376,7 +1398,14 @@ export function UserDashboard() {
                                 editRowData;
 
                               return (
-                                <tr key={`row-${idx}-${row.id || row.mobile || "no-id"}`}>
+                                <tr
+                                  key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
+                                  style={
+                                    row.verification_call
+                                      ? { backgroundColor: "#fff7ed", borderLeft: "4px solid #f97316" }
+                                      : undefined
+                                  }
+                                >
                                   <td className="fw-semibold text-primary">
                                     {row.mobile || "—"}
                                   </td>
@@ -1417,7 +1446,24 @@ export function UserDashboard() {
                                         <option value="Not Interested">Not Interested</option>
                                       </select>
                                     ) : (
-                                      <span className="small text-dark">{row.status || "—"}</span>
+                                      <div className="d-flex flex-column gap-1">
+                                        <span className="small text-dark">
+                                          {row.status || "—"}
+                                        </span>
+                                        {row.verification_call && (
+                                          <span
+                                            className="badge rounded-pill"
+                                            style={{
+                                              width: "fit-content",
+                                              backgroundColor: "#f97316",
+                                              color: "#fff",
+                                              fontSize: "0.65rem",
+                                            }}
+                                          >
+                                            Verification Call
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
                                   </td>
 

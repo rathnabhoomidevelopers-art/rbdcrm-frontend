@@ -26,7 +26,9 @@ const FOLLOW_UP_STATUSES = [
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
 const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
-const TRANSFER_STATUSES = ["NR/SF", "RNR"];
+
+// ✅ Day-based transfer statuses (backend handles 3-day rule)
+const TRANSFER_STATUSES = ["NR/SF", "RNR", "Not Interested", "Invalid"];
 
 function getConsecutiveSameStatusCount(history, newStatus) {
   if (!newStatus) return 0;
@@ -126,7 +128,7 @@ function formatDateTimeDisplay(value) {
   return d.toLocaleString();
 }
 
-// NEW HELPER: tomorrow at 09:00 AM local time
+// tomorrow at 09:00 AM local time
 function getTomorrow9AMForInput() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -139,8 +141,6 @@ export function StatusDashboard() {
   const [originalRows, setOriginalRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
-
-  const [users, setUsers] = useState([]);
 
   const hasRestoredRef = useRef(false);
 
@@ -172,8 +172,6 @@ export function StatusDashboard() {
       let data = leadsRes.data || [];
       const fuData = fuRes.data || [];
 
-      // Backend already filters by Assigned_to for role "user"
-      // Extra frontend filter is optional; can be kept or removed
       if (role === "user") {
         data = data.filter(
           (lead) =>
@@ -256,26 +254,6 @@ export function StatusDashboard() {
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    api
-      .get("/users")
-      .then((res) => {
-        if (!active) return;
-        setUsers(res.data || []);
-      })
-      .catch((err) => {
-        console.error("Error fetching users for transfer logic", {
-          message: err.message,
-          status: err.response?.status,
-          data: err.response?.data,
-        });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const handleFieldChange = (leadId, field, value) => {
     setRows((prev) =>
       prev.map((row) => {
@@ -287,7 +265,6 @@ export function StatusDashboard() {
           updated.status = value;
 
           if (value === "NR/SF" || value === "RNR") {
-            // auto-set to tomorrow 09:00 AM
             updated.date = getTomorrow9AMForInput();
           } else if (
             value === "Details_shared" ||
@@ -302,7 +279,6 @@ export function StatusDashboard() {
           }
           updated.date = value || "";
         } else {
-          // for "project" and any other editable field
           updated[field] = value;
         }
 
@@ -348,7 +324,6 @@ export function StatusDashboard() {
       const newRemark = (newRemarkByLead[updatedRow.lead_id] || "").trim();
 
       if (newRemark) {
-        // when a new remark is typed, date = now
         updatedRow.date = toLocalInputValue(new Date());
       }
 
@@ -361,8 +336,6 @@ export function StatusDashboard() {
         return;
       }
 
-      // If no new remark, and status is in AUTO_24H_STATUSES and date is empty,
-      // set to tomorrow 09:00 AM
       if (
         !newRemark &&
         AUTO_24H_STATUSES.includes(updatedRow.status) &&
@@ -383,77 +356,18 @@ export function StatusDashboard() {
 
       const remarkToSave = newRemark || updatedRow.remarks || "";
 
-      // 🔑 ASSIGNMENT LOGIC
-      // Start from whatever is on the row
+      // For normal users, if Assigned_to is empty/null (old leads),
+      // lock it to logged-in username so it doesn't disappear.
       let newAssignedTo = (updatedRow.Assigned_to || "")
         .toString()
         .trim()
         .toLowerCase() || null;
-      let transferredTo = null;
 
-      // For normal users, if Assigned_to is empty/null (old leads),
-      // lock it to the logged-in username so it doesn't disappear.
       if (role === "user" && !newAssignedTo) {
         newAssignedTo = username || null;
       }
 
-      // Auto-transfer logic for NR/SF and RNR with 7-attempt threshold + round-robin
-      if (
-        role === "user" &&
-        TRANSFER_STATUSES.includes(updatedRow.status || "")
-      ) {
-        const history = followUpHistory[updatedRow.lead_id] || [];
-        const consecutiveCount = getConsecutiveSameStatusCount(
-          history,
-          updatedRow.status
-        );
-
-        if (consecutiveCount >= 7) {
-          const currentAssigned = (newAssignedTo || "")
-            .toString()
-            .trim()
-            .toLowerCase();
-
-          // Build a round-robin pool of normal "user" accounts
-          const roundRobinPool = (users || []).filter((u) => {
-            const uname =
-              u.user_name && u.user_name.toString().trim().toLowerCase();
-            const roleOk = !u.role || u.role === "user";
-            return uname && roleOk;
-          });
-
-          if (roundRobinPool.length > 1) {
-            const currentIdx = roundRobinPool.findIndex((u) => {
-              const uname =
-                u.user_name && u.user_name.toString().trim().toLowerCase();
-              return uname === currentAssigned;
-            });
-
-            let nextUser = null;
-            if (currentIdx === -1) {
-              // current assigned not in pool, just take first user
-              nextUser = roundRobinPool[0];
-            } else {
-              const nextIdx = (currentIdx + 1) % roundRobinPool.length;
-              nextUser = roundRobinPool[nextIdx];
-            }
-
-            if (
-              nextUser &&
-              nextUser.user_name &&
-              nextUser.user_name.toString().trim().toLowerCase() !==
-                currentAssigned
-            ) {
-              newAssignedTo = nextUser.user_name
-                .toString()
-                .trim()
-                .toLowerCase();
-              transferredTo = newAssignedTo;
-            }
-          }
-        }
-      }
-
+      // ✅ If status is follow-up status, always create follow-up entry
       if (isFollowUpStatus) {
         await api.post("/add-follow_up", {
           followup_id: updatedRow.lead_id,
@@ -468,7 +382,8 @@ export function StatusDashboard() {
           remarks: remarkToSave || null,
         });
 
-        await api.put(`/edit-lead/${updatedRow.lead_id}`, {
+        // ✅ IMPORTANT: backend applies 3-day transfer + verification logic
+        const editRes = await api.put(`/edit-lead/${updatedRow.lead_id}`, {
           name: updatedRow.name || null,
           source: updatedRow.source || null,
           status: updatedRow.status || null,
@@ -487,8 +402,18 @@ export function StatusDashboard() {
           duration: 2500,
           position: "top-right",
         });
+
+        if (TRANSFER_STATUSES.includes(updatedRow.status || "")) {
+          if (editRes?.data?.transferredTo) {
+            toast.success(
+              `Lead transferred to ${editRes.data.transferredTo} (Verification Call)`,
+              { duration: 3500, position: "top-right" }
+            );
+          }
+        }
       } else {
-        await api.put(`/edit-lead/${updatedRow.lead_id}`, {
+        // Non-followup statuses: update lead and remove follow-up (if any)
+        const editRes = await api.put(`/edit-lead/${updatedRow.lead_id}`, {
           name: updatedRow.name || null,
           source: updatedRow.source || null,
           status: updatedRow.status || null,
@@ -513,16 +438,15 @@ export function StatusDashboard() {
           duration: 2000,
           position: "top-right",
         });
-      }
 
-      if (transferredTo) {
-        toast.success(
-          `Lead auto-assigned to ${transferredTo} after 7 "${updatedRow.status}" attempts (round-robin).`,
-          {
-            duration: 3000,
-            position: "top-right",
+        if (TRANSFER_STATUSES.includes(updatedRow.status || "")) {
+          if (editRes?.data?.transferredTo) {
+            toast.success(
+              `Lead transferred to ${editRes.data.transferredTo} (Verification Call)`,
+              { duration: 3500, position: "top-right" }
+            );
           }
-        );
+        }
       }
 
       setNewRemarkByLead((prev) => ({
@@ -545,7 +469,7 @@ export function StatusDashboard() {
     }
   };
 
-  // Optional: auto-refresh when other pages dispatch "leads-updated"
+  // Auto-refresh when other pages dispatch "leads-updated"
   useEffect(() => {
     const handler = () => {
       fetchStatusRows();
@@ -790,7 +714,7 @@ export function StatusDashboard() {
 
   const statusPillStyle = getRowBackground(currentRow.status);
 
-  // Compute NR/SF or RNR streak count badge
+  // Keep the streak badge only for display (not used for transfer)
   let nsrBadgeLabel = "";
   if (currentRow.status === "NR/SF" || currentRow.status === "RNR") {
     const streakCount = getConsecutiveSameStatusCount(

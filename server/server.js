@@ -387,11 +387,13 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
 
 /**
  * 🔧 UPDATED: /edit-lead
- * - Now does TRUE PARTIAL UPDATE
- * - Does NOT overwrite Assigned_to (or other fields) unless they are sent in req.body
- * - Fixes the bug where leads disappear from user dashboard after editing
+ * - TRUE PARTIAL UPDATE (keeps Assigned_to unless explicitly provided)
+ * ✅ NEW: keeps follow-ups collection in sync:
+ *    - if status/date changes: update follow-up record too
+ *    - if status becomes NOT tracked: delete follow-up record
+ *    - if status becomes tracked but follow-up missing: create it
  */
-app.put("/edit-lead/:id", auth(["admin", "user"]), (req, res) => {
+app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
   const leadId = req.params.id;
 
   // Build update object only with fields that are actually present in req.body
@@ -404,6 +406,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), (req, res) => {
   if ("budget" in req.body) update.budget = req.body.budget || null;
   if ("project" in req.body) update.project = req.body.project || null;
   if ("remarks" in req.body) update.remarks = req.body.remarks || null;
+
   if ("dob" in req.body) {
     update.dob = req.body.dob ? new Date(req.body.dob) : null;
   }
@@ -431,38 +434,81 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), (req, res) => {
   console.log("edit-lead update object:", update);
   console.log("edit-lead filters:", orFilters);
 
-  mongoClient
-    .connect(connectionString)
-    .then((clientObj) => {
-      const database = clientObj.db("crm");
-      return database
-        .collection("leads")
-        .updateOne({ $or: orFilters }, { $set: update })
-        .then((result) => {
-          console.log("edit-lead result:", result);
+  let clientObj;
+  try {
+    clientObj = await mongoClient.connect(connectionString);
+    const database = clientObj.db("crm");
+    const leadsCol = database.collection("leads");
+    const followUpsCol = database.collection("follow-ups");
 
-          if (result.matchedCount === 0) {
-            console.log("Lead not found for id:", leadId);
-            return res.status(404).json({ message: "Lead not found" });
-          }
+    // First read the existing lead (needed to build correct follow-up update)
+    const existingLead =
+      (await leadsCol.findOne({ $or: orFilters })) || null;
 
-          console.log("Lead updated successfully!..");
-          return res
-            .status(200)
-            .json({ message: "Lead updated successfully" });
-        })
-        .catch((err) => {
-          console.error("Error updating lead", err);
-          return res.status(500).json({ message: "Error updating lead" });
-        })
-        .finally(() => {
-          clientObj.close();
-        });
-    })
-    .catch((err) => {
-      console.error("Database connection error", err);
-      return res.status(500).json({ message: "Database connection error" });
-    });
+    if (!existingLead) {
+      console.log("Lead not found for id:", leadId);
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Update lead
+    const result = await leadsCol.updateOne(
+      { $or: orFilters },
+      { $set: update }
+    );
+
+    console.log("edit-lead result:", result);
+
+    // Build the new "effective" lead data after update
+    const nextLead = { ...existingLead, ...update };
+
+    // --- FOLLOW-UP SYNC LOGIC ---
+    // Determine the lead primary id used by follow-ups
+    const followupId = nextLead.lead_id || existingLead.lead_id;
+
+    const nextStatus = nextLead.status || null;
+    const isTracked = !!(nextStatus && TRACKED_STATUSES.includes(nextStatus));
+
+    if (!isTracked) {
+      // If status is not tracked, remove follow-up if present
+      await followUpsCol.deleteOne({ followup_id: followupId });
+    } else {
+      // If tracked, ensure follow-up exists & is updated
+      const fuUpdate = {};
+
+      // keep follow-up status/date in sync
+      fuUpdate.status = nextStatus;
+      fuUpdate.date = nextLead.dob ? new Date(nextLead.dob) : null;
+
+      // Optional: keep these fields synced too (safe)
+      fuUpdate.name = nextLead.name || null;
+      fuUpdate.mobile = nextLead.mobile ? parseInt(nextLead.mobile, 10) : null;
+      fuUpdate.source = nextLead.source || null;
+      fuUpdate.job_role = nextLead.job_role || null;
+      fuUpdate.budget = nextLead.budget || null;
+      fuUpdate.project = nextLead.project || null;
+      fuUpdate.remarks = nextLead.remarks || null;
+
+      // Upsert follow-up (create if missing)
+      await followUpsCol.updateOne(
+        { followup_id: followupId },
+        {
+          $set: fuUpdate,
+          $setOnInsert: { followup_id: followupId, createdAt: new Date() },
+        },
+        { upsert: true }
+      );
+    }
+
+    console.log("Lead updated successfully + follow-up synced!..");
+    return res.status(200).json({ message: "Lead updated successfully" });
+  } catch (err) {
+    console.error("Error updating lead", err);
+    return res.status(500).json({ message: "Error updating lead" });
+  } finally {
+    if (clientObj) {
+      await clientObj.close();
+    }
+  }
 });
 
 app.delete("/delete-lead/:id", auth(["admin"]), (req, res) => {
