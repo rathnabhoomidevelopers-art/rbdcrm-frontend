@@ -1,5 +1,5 @@
 // src/UserDashboard.js
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Users,
@@ -11,9 +11,21 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 
+/* ===================== CONSTANTS ===================== */
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
 const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
 
+const DASHBOARD_FOLLOWUP_STATUSES = [
+  "Follow Up",
+  "Follow-up",
+  "Visit Scheduled",
+  "NR/SF",
+  "RNR",
+  "Details_shared",
+  "Site Visited",
+];
+
+/* ===================== HELPERS ===================== */
 const toLocalInputValue = (date) => {
   if (!date) return "";
   const d = date instanceof Date ? date : new Date(date);
@@ -32,16 +44,6 @@ const getNowPlus24Hours = () => {
   d.setHours(d.getHours() + 24);
   return toLocalInputValue(d);
 };
-
-const DASHBOARD_FOLLOWUP_STATUSES = [
-  "Follow Up",
-  "Follow-up",
-  "Visit Scheduled",
-  "NR/SF",
-  "RNR",
-  "Details_shared",
-  "Site Visited",
-];
 
 const normalizeAndValidateMobile = (raw) => {
   if (!raw) {
@@ -111,6 +113,12 @@ export function UserDashboard() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalRows, setModalRows] = useState([]);
 
+  // ✅ NEW: Remember which modal "container" is open so we can rebuild after edits
+  const [modalContext, setModalContext] = useState(null);
+  // modalContext:
+  // { kind: "summary", type: "leads" | "followups" | "sitevisits" | "booked" }
+  // { kind: "group", bucketLabel: "Overdue"|"Today"|"Tomorrow", assignedTo: string, status: string }
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [newLead, setNewLead] = useState({
     name: "",
@@ -126,7 +134,7 @@ export function UserDashboard() {
   });
 
   // Edit state for rows inside modal
-  const [editingRowId, setEditingRowId] = useState(null); // this will store LEAD ID
+  const [editingRowId, setEditingRowId] = useState(null); // LEAD ID
   const [editRowData, setEditRowData] = useState(null); // editable data for that row
 
   const role = localStorage.getItem("role");
@@ -144,9 +152,7 @@ export function UserDashboard() {
 
   const fetchStats = async ({ showFullScreenLoader = false } = {}) => {
     try {
-      if (showFullScreenLoader) {
-        setLoading(true);
-      }
+      if (showFullScreenLoader) setLoading(true);
       setRefreshing(!showFullScreenLoader);
 
       const [leadsRes, followUpsRes] = await Promise.all([
@@ -170,8 +176,9 @@ export function UserDashboard() {
       }
 
       const totalLeads = leads.length;
-      const latestByLead = {};
 
+      // latest follow-up per lead
+      const latestByLead = {};
       const getTime = (item) => {
         if (!item || !item.date) return 0;
         const t = new Date(item.date).getTime();
@@ -284,11 +291,14 @@ export function UserDashboard() {
     };
   }, []);
 
-  const leadIndex = {};
-  (leadsData || []).forEach((l) => {
-    const key = l.lead_id || l._id;
-    if (key) leadIndex[key] = l;
-  });
+  const leadIndex = useMemo(() => {
+    const idx = {};
+    (leadsData || []).forEach((l) => {
+      const key = l.lead_id || l._id;
+      if (key) idx[key] = l;
+    });
+    return idx;
+  }, [leadsData]);
 
   const buildUserStatusGroups = (items) => {
     const result = {};
@@ -298,7 +308,7 @@ export function UserDashboard() {
 
       const assignedRaw =
         lead && lead.Assigned_to ? lead.Assigned_to : "Unassigned";
-      const assigned = assignedRaw.trim() || "Unassigned";
+      const assigned = (assignedRaw || "").trim() || "Unassigned";
 
       const st = (lead && lead.status) || fu.status || "Unknown";
 
@@ -313,8 +323,162 @@ export function UserDashboard() {
   const todayUserGroups = buildUserStatusGroups(followUpAlerts.today);
   const tomorrowUserGroups = buildUserStatusGroups(followUpAlerts.tomorrow);
 
+  // ✅ NEW: Rebuild current open modal based on latest data + modalContext
+  const rebuildModalFromContext = () => {
+    if (!modalOpen || !modalContext) return;
+
+    // Summary modal
+    if (modalContext.kind === "summary") {
+      const type = modalContext.type;
+
+      if (type === "leads") {
+        setModalTitle("All Leads");
+        setModalRows(
+          (leadsData || []).map((l) => ({
+            id: l.lead_id || l._id,
+            leadKey: l.lead_id || l._id,
+            name: l.name || "",
+            mobile: l.mobile || "",
+            status: l.status || "",
+            source: l.source || "",
+            date: l.dob || null,
+            remarks: l.remarks || "",
+            Assigned_to: l.Assigned_to || "",
+            project: l.project || "",
+          }))
+        );
+        return;
+      }
+
+      if (type === "followups") {
+        setModalTitle("Follow-Up Leads");
+        setModalRows(
+          (followUpsData || []).map((fu) => {
+            const key = fu.followup_id || fu.lead_id || fu._id;
+            const lead = leadIndex[key];
+            const leadKey =
+              (lead && (lead.lead_id || lead._id)) ||
+              fu.lead_id ||
+              fu.followup_id ||
+              fu._id;
+
+            return {
+              id: fu.followup_id || fu._id,
+              leadKey,
+              name: fu.name || (lead && lead.name) || "",
+              mobile: fu.mobile || (lead && lead.mobile) || "",
+              status: (lead && lead.status) || fu.status || "",
+              source: fu.source || (lead && lead.source) || "",
+              date: fu.date || (lead && lead.dob) || null,
+              remarks: fu.remarks || (lead && lead.remarks) || "",
+              Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
+              project: fu.project || (lead && lead.project) || "",
+            };
+          })
+        );
+        return;
+      }
+
+      if (type === "sitevisits") {
+        setModalTitle("Site Visit Leads");
+        const filtered = (leadsData || []).filter(
+          (l) => l.status === "Site Visited"
+        );
+        setModalRows(
+          filtered.map((l) => ({
+            id: l.lead_id || l._id,
+            leadKey: l.lead_id || l._id,
+            name: l.name || "",
+            mobile: l.mobile || "",
+            status: l.status || "",
+            source: l.source || "",
+            date: l.dob || null,
+            remarks: l.remarks || "",
+            Assigned_to: l.Assigned_to || "",
+            project: l.project || "",
+          }))
+        );
+        return;
+      }
+
+      if (type === "booked") {
+        setModalTitle("Booked Leads");
+        const filtered = (leadsData || []).filter((l) => l.status === "Booked");
+        setModalRows(
+          filtered.map((l) => ({
+            id: l.lead_id || l._id,
+            leadKey: l.lead_id || l._id,
+            name: l.name || "",
+            mobile: l.mobile || "",
+            status: l.status || "",
+            source: l.source || "",
+            date: l.dob || null,
+            remarks: l.remarks || "",
+            Assigned_to: l.Assigned_to || "",
+            project: l.project || "",
+          }))
+        );
+        return;
+      }
+    }
+
+    // Group modal (Overdue/Today/Tomorrow)
+    if (modalContext.kind === "group") {
+      const { bucketLabel, assignedTo, status } = modalContext;
+
+      const bucketArr =
+        bucketLabel === "Overdue"
+          ? followUpAlerts.overdue
+          : bucketLabel === "Today"
+          ? followUpAlerts.today
+          : followUpAlerts.tomorrow;
+
+      const groups = buildUserStatusGroups(bucketArr);
+      const list = (groups?.[assignedTo]?.[status] || []).map(({ fu, lead }) => {
+        const leadKey =
+          (lead && (lead.lead_id || lead._id)) ||
+          fu.lead_id ||
+          fu.followup_id ||
+          fu._id;
+
+        return {
+          id: fu.followup_id || fu._id,
+          leadKey,
+          name: fu.name || (lead && lead.name) || "",
+          mobile: fu.mobile || (lead && lead.mobile) || "",
+          status: (lead && lead.status) || fu.status || "",
+          source: fu.source || (lead && lead.source) || "",
+          date: fu.date || (lead && lead.dob) || null,
+          remarks: fu.remarks || (lead && lead.remarks) || "",
+          Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
+          project: fu.project || (lead && lead.project) || "",
+        };
+      });
+
+      setModalTitle(`${bucketLabel} – ${assignedTo} – ${status}`);
+      setModalRows(list);
+    }
+  };
+
+  // ✅ Auto-rebuild open modal whenever data updates (so rows move out correctly)
+  useEffect(() => {
+    if (!modalOpen || !modalContext) return;
+    rebuildModalFromContext();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    modalOpen,
+    modalContext,
+    leadsData,
+    followUpsData,
+    followUpAlerts.overdue,
+    followUpAlerts.today,
+    followUpAlerts.tomorrow,
+  ]);
+
   // Common modal opener for summary cards (for BOTH admin & user)
   const openModal = (type) => {
+    setModalContext({ kind: "summary", type });
+
     let title = "";
     let rows = [];
 
@@ -350,7 +514,6 @@ export function UserDashboard() {
           mobile: fu.mobile || (lead && lead.mobile) || "",
           status: (lead && lead.status) || fu.status || "",
           source: fu.source || (lead && lead.source) || "",
-          // prefer follow-up date for buckets
           date: fu.date || (lead && lead.dob) || null,
           remarks: fu.remarks || (lead && lead.remarks) || "",
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
@@ -400,6 +563,8 @@ export function UserDashboard() {
 
   // Group modal (Overdue / Today / Tomorrow) – for BOTH admin & user
   const openGroupModal = (bucketLabel, assignedTo, status, items) => {
+    setModalContext({ kind: "group", bucketLabel, assignedTo, status });
+
     const title = `${bucketLabel} – ${assignedTo} – ${status}`;
     const rows = (items || []).map(({ fu, lead }) => {
       const leadKey =
@@ -435,6 +600,7 @@ export function UserDashboard() {
     setModalTitle("");
     setEditingRowId(null);
     setEditRowData(null);
+    setModalContext(null); // ✅ reset context
   };
 
   const openAddLeadModal = () => {
@@ -487,9 +653,7 @@ export function UserDashboard() {
   const handleAddLeadSubmit = async (e) => {
     e.preventDefault();
 
-    const { ok, error, normalized } = normalizeAndValidateMobile(
-      newLead.mobile
-    );
+    const { ok, error, normalized } = normalizeAndValidateMobile(newLead.mobile);
     if (!ok) {
       toast.error(error);
       return;
@@ -521,10 +685,7 @@ export function UserDashboard() {
         return;
       }
 
-      if (
-        AUTO_24H_STATUSES.includes(statusToSave) &&
-        (!dobToSave || dobToSave === "")
-      ) {
+      if (AUTO_24H_STATUSES.includes(statusToSave) && (!dobToSave || dobToSave === "")) {
         dobToSave = getNowPlus24Hours();
       }
 
@@ -577,10 +738,7 @@ export function UserDashboard() {
       const next = { ...prev, [field]: value };
 
       if (field === "status") {
-        if (
-          AUTO_24H_STATUSES.includes(value) &&
-          (!prev.date || prev.date === "")
-        ) {
+        if (AUTO_24H_STATUSES.includes(value) && (!prev.date || prev.date === "")) {
           next.date = getNowPlus24Hours();
         }
       }
@@ -604,23 +762,21 @@ export function UserDashboard() {
         remarks: editRowData.remarks || null,
         project: editRowData.project || null,
         dob: editRowData.date || null,
-        // keep Assigned_to consistent with backend & user filtering
         Assigned_to: editRowData.Assigned_to || null,
       };
 
       await api.put(`/edit-lead/${editingRowId}`, payload);
 
       toast.success("Lead updated successfully");
-      setModalRows((prev) =>
-        prev.map((r) =>
-          (r.leadKey || r.id) === editingRowId ? { ...r, ...editRowData } : r
-        )
-      );
+
+      // ✅ Don't patch modalRows; refresh and rebuild so it moves out of container correctly
+      cancelEditRow();
 
       window.dispatchEvent(new Event("leads-updated"));
       await fetchStats({ showFullScreenLoader: false });
 
-      cancelEditRow();
+      // rebuild open modal immediately (useEffect will also keep it synced)
+      rebuildModalFromContext();
     } catch (err) {
       console.error("Error updating lead", {
         message: err.message,
@@ -643,10 +799,7 @@ export function UserDashboard() {
       >
         <div className="text-center">
           <div className="spinner-border text-primary mb-3" role="status" />
-          <div
-            className="fw-semibold text-muted"
-            style={{ fontSize: "1.1rem" }}
-          >
+          <div className="fw-semibold text-muted" style={{ fontSize: "1.1rem" }}>
             Preparing your dashboard…
           </div>
         </div>
@@ -697,21 +850,12 @@ export function UserDashboard() {
                         📊
                       </span>
                       <div>
-                        <h2
-                          className="fw-semibold mb-1"
-                          style={{ fontSize: "2rem" }}
-                        >
+                        <h2 className="fw-semibold mb-1" style={{ fontSize: "2rem" }}>
                           {role === "admin"
                             ? "Admin Follow-up Dashboard"
                             : "User Performance Dashboard"}
                         </h2>
-                        <div
-                          style={{
-                            opacity: 0.9,
-                            maxWidth: 520,
-                            fontSize: "1rem",
-                          }}
-                        >
+                        <div style={{ opacity: 0.9, maxWidth: 520, fontSize: "1rem" }}>
                           Stay on top of your{" "}
                           <strong>leads, follow-ups, site visits</strong> and{" "}
                           <strong>bookings</strong> at a glance.
@@ -725,19 +869,12 @@ export function UserDashboard() {
                       <button
                         type="button"
                         className="btn btn-light d-flex align-items-center gap-2 px-4 py-2 shadow-sm rounded-pill"
-                        onClick={() =>
-                          fetchStats({ showFullScreenLoader: false })
-                        }
+                        onClick={() => fetchStats({ showFullScreenLoader: false })}
                         disabled={refreshing}
                         style={{ fontSize: "0.95rem", fontWeight: 600 }}
                       >
-                        <RefreshCw
-                          size={16}
-                          className={refreshing ? "spin" : ""}
-                        />
-                        <span>
-                          {refreshing ? "Refreshing…" : "Refresh Data"}
-                        </span>
+                        <RefreshCw size={16} className={refreshing ? "spin" : ""} />
+                        <span>{refreshing ? "Refreshing…" : "Refresh Data"}</span>
                       </button>
 
                       <button
@@ -786,15 +923,11 @@ export function UserDashboard() {
                     ✅
                   </div>
                   <div>
-                    <div
-                      className="fw-semibold text-success mb-1"
-                      style={{ fontSize: "1.1rem" }}
-                    >
+                    <div className="fw-semibold text-success mb-1" style={{ fontSize: "1.1rem" }}>
                       You&apos;re all caught up!
                     </div>
                     <div style={{ fontSize: "0.98rem", color: "#6c757d" }}>
-                      No pending follow-up calls scheduled for today or
-                      tomorrow.
+                      No pending follow-up calls scheduled for today or tomorrow.
                     </div>
                   </div>
                 </div>
@@ -824,44 +957,25 @@ export function UserDashboard() {
                       >
                         Overdue
                       </span>
-                      <span
-                        className="fw-bold text-danger"
-                        style={{ fontSize: "1.4rem" }}
-                      >
+                      <span className="fw-bold text-danger" style={{ fontSize: "1.4rem" }}>
                         {followUpAlerts.overdue.length}
                       </span>
                     </div>
+
                     {followUpAlerts.overdue.length === 0 ? (
                       <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>
                         No overdue follow-ups.
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Overdue follow-ups by user &amp; status:
                         </div>
-                        <div
-                          style={{
-                            fontSize: "0.9rem",
-                            maxHeight: 140,
-                            overflowY: "auto",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
                           {Object.entries(overdueUserGroups).map(
                             ([assignedTo, statusMap], idxUser) => (
-                              <div
-                                key={`${assignedTo}-${idxUser}`}
-                                className="mb-2"
-                              >
-                                <div className="fw-semibold">
-                                  {assignedTo}
-                                </div>
+                              <div key={`${assignedTo}-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
                                 <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
                                   {Object.entries(statusMap).map(
                                     ([status, list], idxStatus) => (
@@ -870,16 +984,10 @@ export function UserDashboard() {
                                         type="button"
                                         className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
                                         onClick={() =>
-                                          openGroupModal(
-                                            "Overdue",
-                                            assignedTo,
-                                            status,
-                                            list
-                                          )
+                                          openGroupModal("Overdue", assignedTo, status, list)
                                         }
                                       >
-                                        {status}:{" "}
-                                        <strong>{list.length}</strong>
+                                        {status}: <strong>{list.length}</strong>
                                       </button>
                                     )
                                   )}
@@ -916,44 +1024,25 @@ export function UserDashboard() {
                       >
                         Today
                       </span>
-                      <span
-                        className="fw-bold text-warning"
-                        style={{ fontSize: "1.4rem" }}
-                      >
+                      <span className="fw-bold text-warning" style={{ fontSize: "1.4rem" }}>
                         {followUpAlerts.today.length}
                       </span>
                     </div>
+
                     {followUpAlerts.today.length === 0 ? (
                       <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>
                         No follow-up calls scheduled for today.
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Today&apos;s follow-ups by user &amp; status:
                         </div>
-                        <div
-                          style={{
-                            fontSize: "0.9rem",
-                            maxHeight: 140,
-                            overflowY: "auto",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
                           {Object.entries(todayUserGroups).map(
                             ([assignedTo, statusMap], idxUser) => (
-                              <div
-                                key={`${assignedTo}-today-${idxUser}`}
-                                className="mb-2"
-                              >
-                                <div className="fw-semibold">
-                                  {assignedTo}
-                                </div>
+                              <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
                                 <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
                                   {Object.entries(statusMap).map(
                                     ([status, list], idxStatus) => (
@@ -962,16 +1051,10 @@ export function UserDashboard() {
                                         type="button"
                                         className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
                                         onClick={() =>
-                                          openGroupModal(
-                                            "Today",
-                                            assignedTo,
-                                            status,
-                                            list
-                                          )
+                                          openGroupModal("Today", assignedTo, status, list)
                                         }
                                       >
-                                        {status}:{" "}
-                                        <strong>{list.length}</strong>
+                                        {status}: <strong>{list.length}</strong>
                                       </button>
                                     )
                                   )}
@@ -1008,44 +1091,25 @@ export function UserDashboard() {
                       >
                         Tomorrow
                       </span>
-                      <span
-                        className="fw-bold text-info"
-                        style={{ fontSize: "1.4rem" }}
-                      >
+                      <span className="fw-bold text-info" style={{ fontSize: "1.4rem" }}>
                         {followUpAlerts.tomorrow.length}
                       </span>
                     </div>
+
                     {followUpAlerts.tomorrow.length === 0 ? (
                       <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>
                         No follow-up calls scheduled for tomorrow.
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Tomorrow&apos;s follow-ups by user &amp; status:
                         </div>
-                        <div
-                          style={{
-                            fontSize: "0.9rem",
-                            maxHeight: 140,
-                            overflowY: "auto",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
                           {Object.entries(tomorrowUserGroups).map(
                             ([assignedTo, statusMap], idxUser) => (
-                              <div
-                                key={`${assignedTo}-tomorrow-${idxUser}`}
-                                className="mb-2"
-                              >
-                                <div className="fw-semibold">
-                                  {assignedTo}
-                                </div>
+                              <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
                                 <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
                                   {Object.entries(statusMap).map(
                                     ([status, list], idxStatus) => (
@@ -1054,16 +1118,10 @@ export function UserDashboard() {
                                         type="button"
                                         className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
                                         onClick={() =>
-                                          openGroupModal(
-                                            "Tomorrow",
-                                            assignedTo,
-                                            status,
-                                            list
-                                          )
+                                          openGroupModal("Tomorrow", assignedTo, status, list)
                                         }
                                       >
-                                        {status}:{" "}
-                                        <strong>{list.length}</strong>
+                                        {status}: <strong>{list.length}</strong>
                                       </button>
                                     )
                                   )}
@@ -1096,38 +1154,25 @@ export function UserDashboard() {
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow =
-                  "0 16px 32px rgba(15, 23, 42, 0.18)";
+                e.currentTarget.style.boxShadow = "0 16px 32px rgba(15, 23, 42, 0.18)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow =
-                  "0 10px 24px rgba(15, 23, 42, 0.12)";
+                e.currentTarget.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.12)";
               }}
             >
               <div className="card-body d-flex align-items-center gap-3 py-4 px-4">
                 <div
                   className="d-inline-flex align-items-center justify-content-center rounded-circle"
-                  style={{
-                    width: 52,
-                    height: 52,
-                    backgroundColor: "#e5f3ff",
-                    color: "#0d6efd",
-                  }}
+                  style={{ width: 52, height: 52, backgroundColor: "#e5f3ff", color: "#0d6efd" }}
                 >
                   <Users size={26} />
                 </div>
                 <div>
-                  <div
-                    className="text-muted text-uppercase mb-1"
-                    style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}
-                  >
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}>
                     Total Leads
                   </div>
-                  <div
-                    className="fw-bold"
-                    style={{ fontSize: "2.1rem", lineHeight: 1.1 }}
-                  >
+                  <div className="fw-bold" style={{ fontSize: "2.1rem", lineHeight: 1.1 }}>
                     {stats.totalLeads}
                   </div>
                   <div style={{ fontSize: "0.98rem", color: "#6c757d" }}>
@@ -1145,46 +1190,32 @@ export function UserDashboard() {
               onClick={() => openModal("followups")}
               style={{
                 borderRadius: "1.15rem",
-                background:
-                  "linear-gradient(135deg, #fffaf0 0%, #fff7e6 100%)",
+                background: "linear-gradient(135deg, #fffaf0 0%, #fff7e6 100%)",
                 minHeight: 180,
                 cursor: "pointer",
                 transition: "transform 0.1s ease, box-shadow 0.1s ease",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow =
-                  "0 16px 32px rgba(15, 23, 42, 0.18)";
+                e.currentTarget.style.boxShadow = "0 16px 32px rgba(15, 23, 42, 0.18)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow =
-                  "0 10px 24px rgba(15, 23, 42, 0.12)";
+                e.currentTarget.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.12)";
               }}
             >
               <div className="card-body d-flex align-items-center gap-3 py-4 px-4">
                 <div
                   className="d-inline-flex align-items-center justify-content-center rounded-circle"
-                  style={{
-                    width: 52,
-                    height: 52,
-                    backgroundColor: "#fff3cd",
-                    color: "#664d03",
-                  }}
+                  style={{ width: 52, height: 52, backgroundColor: "#fff3cd", color: "#664d03" }}
                 >
                   <ClipboardList size={26} />
                 </div>
                 <div>
-                  <div
-                    className="text-muted text-uppercase mb-1"
-                    style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}
-                  >
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}>
                     Total Follow Ups
                   </div>
-                  <div
-                    className="fw-bold"
-                    style={{ fontSize: "2.1rem", lineHeight: 1.1 }}
-                  >
+                  <div className="fw-bold" style={{ fontSize: "2.1rem", lineHeight: 1.1 }}>
                     {stats.totalFollowUps}
                   </div>
                   <div style={{ fontSize: "0.98rem", color: "#6c757d" }}>
@@ -1202,46 +1233,32 @@ export function UserDashboard() {
               onClick={() => openModal("sitevisits")}
               style={{
                 borderRadius: "1.15rem",
-                background:
-                  "linear-gradient(135deg, #ecfdf3 0%, #daf5e6 100%)",
+                background: "linear-gradient(135deg, #ecfdf3 0%, #daf5e6 100%)",
                 minHeight: 180,
                 cursor: "pointer",
                 transition: "transform 0.1s ease, box-shadow 0.1s ease",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow =
-                  "0 16px 32px rgba(15, 23, 42, 0.18)";
+                e.currentTarget.style.boxShadow = "0 16px 32px rgba(15, 23, 42, 0.18)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow =
-                  "0 10px 24px rgba(15, 23, 42, 0.12)";
+                e.currentTarget.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.12)";
               }}
             >
               <div className="card-body d-flex align-items-center gap-3 py-4 px-4">
                 <div
                   className="d-inline-flex align-items-center justify-content-center rounded-circle"
-                  style={{
-                    width: 52,
-                    height: 52,
-                    backgroundColor: "#e0f7ed",
-                    color: "#0f5132",
-                  }}
+                  style={{ width: 52, height: 52, backgroundColor: "#e0f7ed", color: "#0f5132" }}
                 >
                   <MapPinCheck size={26} />
                 </div>
                 <div>
-                  <div
-                    className="text-muted text-uppercase mb-1"
-                    style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}
-                  >
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}>
                     Site Visits
                   </div>
-                  <div
-                    className="fw-bold"
-                    style={{ fontSize: "2.1rem", lineHeight: 1.1 }}
-                  >
+                  <div className="fw-bold" style={{ fontSize: "2.1rem", lineHeight: 1.1 }}>
                     {stats.totalSiteVisits}
                   </div>
                   <div style={{ fontSize: "0.98rem", color: "#6c757d" }}>
@@ -1266,38 +1283,25 @@ export function UserDashboard() {
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.transform = "translateY(-2px)";
-                e.currentTarget.style.boxShadow =
-                  "0 16px 32px rgba(15, 23, 42, 0.18)";
+                e.currentTarget.style.boxShadow = "0 16px 32px rgba(15, 23, 42, 0.18)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow =
-                  "0 10px 24px rgba(15, 23, 42, 0.12)";
+                e.currentTarget.style.boxShadow = "0 10px 24px rgba(15, 23, 42, 0.12)";
               }}
             >
               <div className="card-body d-flex align-items-center gap-3 py-4 px-4">
                 <div
                   className="d-inline-flex align-items-center justify-content-center rounded-circle"
-                  style={{
-                    width: 52,
-                    height: 52,
-                    backgroundColor: "#e0f7ed",
-                    color: "#0f5132",
-                  }}
+                  style={{ width: 52, height: 52, backgroundColor: "#e0f7ed", color: "#0f5132" }}
                 >
                   <PhoneCall size={26} />
                 </div>
                 <div>
-                  <div
-                    className="text-muted text-uppercase mb-1"
-                    style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}
-                  >
+                  <div className="text-muted text-uppercase mb-1" style={{ fontSize: "0.95rem", letterSpacing: "0.04em" }}>
                     Booked
                   </div>
-                  <div
-                    className="fw-bold"
-                    style={{ fontSize: "2.1rem", lineHeight: 1.1 }}
-                  >
+                  <div className="fw-bold" style={{ fontSize: "2.1rem", lineHeight: 1.1 }}>
                     {stats.totalBooked}
                   </div>
                   <div style={{ fontSize: "0.98rem", color: "#6c757d" }}>
@@ -1333,12 +1337,9 @@ export function UserDashboard() {
                 >
                   <div className="modal-header bg-light border-bottom">
                     <h5 className="modal-title fw-semibold">{modalTitle}</h5>
-                    <button
-                      type="button"
-                      className="btn-close"
-                      onClick={closeModal}
-                    />
+                    <button type="button" className="btn-close" onClick={closeModal} />
                   </div>
+
                   <div
                     className="modal-body"
                     style={{
@@ -1361,9 +1362,7 @@ export function UserDashboard() {
                               <th style={{ width: "16%" }}>Project</th>
                               <th style={{ width: "14%" }}>Status</th>
                               <th style={{ width: "24%" }}>Remarks</th>
-                              <th style={{ width: "18%" }}>
-                                Date &amp; Time
-                              </th>
+                              <th style={{ width: "18%" }}>Date &amp; Time</th>
                               <th style={{ width: "18%" }}>Assigned to</th>
                               <th style={{ width: "12%" }}>Actions</th>
                             </tr>
@@ -1377,13 +1376,12 @@ export function UserDashboard() {
                                 editRowData;
 
                               return (
-                                <tr
-                                  key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
-                                >
+                                <tr key={`row-${idx}-${row.id || row.mobile || "no-id"}`}>
                                   <td className="fw-semibold text-primary">
                                     {row.mobile || "—"}
                                   </td>
                                   <td>{row.name || "—"}</td>
+
                                   <td>
                                     {isEditing ? (
                                       <input
@@ -1391,54 +1389,38 @@ export function UserDashboard() {
                                         className="form-control form-control-sm"
                                         value={editRowData.project || ""}
                                         onChange={(e) =>
-                                          handleEditRowChange(
-                                            "project",
-                                            e.target.value
-                                          )
+                                          handleEditRowChange("project", e.target.value)
                                         }
                                       />
                                     ) : (
                                       row.project || "—"
                                     )}
                                   </td>
+
                                   <td>
                                     {isEditing ? (
                                       <select
                                         className="form-select form-select-sm"
                                         value={editRowData.status || ""}
                                         onChange={(e) =>
-                                          handleEditRowChange(
-                                            "status",
-                                            e.target.value
-                                          )
+                                          handleEditRowChange("status", e.target.value)
                                         }
                                       >
-                                        <option value="">
-                                          Select status
-                                        </option>
-                                        <option value="Details_shared">
-                                          Details_shared
-                                        </option>
+                                        <option value="">Select status</option>
+                                        <option value="Details_shared">Details_shared</option>
                                         <option value="NR/SF">NR/SF</option>
-                                        <option value="Visit Scheduled">
-                                          Visit Scheduled
-                                        </option>
+                                        <option value="Visit Scheduled">Visit Scheduled</option>
                                         <option value="RNR">RNR</option>
-                                        <option value="Site Visited">
-                                          Site Visited
-                                        </option>
+                                        <option value="Site Visited">Site Visited</option>
                                         <option value="Booked">Booked</option>
                                         <option value="Invalid">Invalid</option>
-                                        <option value="Not Interested">
-                                          Not Interested
-                                        </option>
+                                        <option value="Not Interested">Not Interested</option>
                                       </select>
                                     ) : (
-                                      <span className="small text-dark">
-                                        {row.status || "—"}
-                                      </span>
+                                      <span className="small text-dark">{row.status || "—"}</span>
                                     )}
                                   </td>
+
                                   <td>
                                     {isEditing ? (
                                       <textarea
@@ -1446,10 +1428,7 @@ export function UserDashboard() {
                                         className="form-control form-control-sm"
                                         value={editRowData.remarks || ""}
                                         onChange={(e) =>
-                                          handleEditRowChange(
-                                            "remarks",
-                                            e.target.value
-                                          )
+                                          handleEditRowChange("remarks", e.target.value)
                                         }
                                       />
                                     ) : (
@@ -1458,6 +1437,7 @@ export function UserDashboard() {
                                       </span>
                                     )}
                                   </td>
+
                                   <td>
                                     {isEditing ? (
                                       <input
@@ -1465,28 +1445,23 @@ export function UserDashboard() {
                                         className="form-control form-control-sm"
                                         value={editRowData.date || ""}
                                         onChange={(e) =>
-                                          handleEditRowChange(
-                                            "date",
-                                            e.target.value
-                                          )
+                                          handleEditRowChange("date", e.target.value)
                                         }
-                                        disabled={HARD_LOCK_STATUSES.includes(
-                                          editRowData.status
-                                        )}
+                                        disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
                                       />
                                     ) : (
                                       <span className="small fw-semibold">
-                                        {row.date
-                                          ? formatDateTime(row.date)
-                                          : "—"}
+                                        {row.date ? formatDateTime(row.date) : "—"}
                                       </span>
                                     )}
                                   </td>
+
                                   <td>
                                     <span className="small text-dark">
                                       {row.Assigned_to || "—"}
                                     </span>
                                   </td>
+
                                   <td>
                                     {isEditing ? (
                                       <div className="d-flex flex-column gap-1">
@@ -1523,6 +1498,7 @@ export function UserDashboard() {
                       </div>
                     )}
                   </div>
+
                   <div className="modal-footer bg-light border-top">
                     <div className="me-auto small text-muted">
                       Showing <strong>{modalRows.length}</strong> record(s)
@@ -1553,10 +1529,7 @@ export function UserDashboard() {
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>
               <div
                 className="rounded-4 bg-white border border-slate-200 shadow-2xl"
-                style={{
-                  maxHeight: "80vh",
-                  overflowY: "auto",
-                }}
+                style={{ maxHeight: "80vh", overflowY: "auto" }}
               >
                 <div className="d-flex align-items-center justify-content-between px-4 py-3 border-bottom">
                   <h5 className="mb-0 fw-semibold d-flex align-items-center gap-2">
@@ -1591,9 +1564,7 @@ export function UserDashboard() {
                         type="text"
                         className="form-control form-control-sm"
                         value={newLead.name}
-                        onChange={(e) =>
-                          handleNewLeadChange("name", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("name", e.target.value)}
                       />
                     </div>
 
@@ -1605,9 +1576,7 @@ export function UserDashboard() {
                         type="tel"
                         className="form-control form-control-sm"
                         value={newLead.mobile}
-                        onChange={(e) =>
-                          handleNewLeadChange("mobile", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("mobile", e.target.value)}
                         required
                       />
                     </div>
@@ -1618,9 +1587,7 @@ export function UserDashboard() {
                         type="text"
                         className="form-control form-control-sm"
                         value={newLead.source}
-                        onChange={(e) =>
-                          handleNewLeadChange("source", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("source", e.target.value)}
                       />
                     </div>
 
@@ -1631,9 +1598,7 @@ export function UserDashboard() {
                         type="text"
                         className="form-control form-control-sm"
                         value={newLead.project}
-                        onChange={(e) =>
-                          handleNewLeadChange("project", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("project", e.target.value)}
                         placeholder="Project name / code"
                       />
                     </div>
@@ -1643,9 +1608,7 @@ export function UserDashboard() {
                       <select
                         className="form-select form-select-sm"
                         value={newLead.status}
-                        onChange={(e) =>
-                          handleNewLeadChange("status", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("status", e.target.value)}
                       >
                         <option value="">Select status</option>
                         <option value="Details_shared">Details_shared</option>
@@ -1665,9 +1628,7 @@ export function UserDashboard() {
                         type="text"
                         className="form-control form-control-sm"
                         value={newLead.job_role}
-                        onChange={(e) =>
-                          handleNewLeadChange("job_role", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("job_role", e.target.value)}
                       />
                     </div>
 
@@ -1677,9 +1638,7 @@ export function UserDashboard() {
                         type="text"
                         className="form-control form-control-sm"
                         value={newLead.budget}
-                        onChange={(e) =>
-                          handleNewLeadChange("budget", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("budget", e.target.value)}
                       />
                     </div>
 
@@ -1696,31 +1655,23 @@ export function UserDashboard() {
                     </div>
 
                     <div className="col-12">
-                      <label className="text-muted mb-1">
-                        Call Date &amp; Time
-                      </label>
+                      <label className="text-muted mb-1">Call Date &amp; Time</label>
                       <input
                         type="datetime-local"
                         className="form-control form-control-sm"
                         value={newLead.dob || ""}
-                        onChange={(e) =>
-                          handleNewLeadChange("dob", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("dob", e.target.value)}
                         disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
                       />
                     </div>
 
                     <div className="col-12 mt-2">
-                      <label className="text-muted mb-1">
-                        Remarks / Notes
-                      </label>
+                      <label className="text-muted mb-1">Remarks / Notes</label>
                       <textarea
                         rows={3}
                         className="form-control form-control-sm"
                         value={newLead.remarks}
-                        onChange={(e) =>
-                          handleNewLeadChange("remarks", e.target.value)
-                        }
+                        onChange={(e) => handleNewLeadChange("remarks", e.target.value)}
                         placeholder="Add remarks about this lead..."
                       />
                     </div>
@@ -1734,10 +1685,7 @@ export function UserDashboard() {
                     >
                       Cancel
                     </button>
-                    <button
-                      type="submit"
-                      className="btn btn-primary btn-sm rounded-pill px-3"
-                    >
+                    <button type="submit" className="btn btn-primary btn-sm rounded-pill px-3">
                       Save Lead
                     </button>
                   </div>
