@@ -36,7 +36,18 @@ function getStatusTextClass(status) {
       return "text-info fw-semibold small";
     case "nr/sf":
     case "rnr":
+    case "busy":
       return "text-secondary fw-semibold small";
+    case "location issue":
+      return "text-success fw-semibold small";
+    case "cp":
+      return "text-primary fw-semibold small";
+    case "budget issue":
+      return "text-warning fw-semibold small";
+    case "visit postponed":
+      return "text-info fw-semibold small";
+    case "closed":
+      return "text-danger fw-semibold small";
     case "invalid":
     case "not interested":
       return "text-danger fw-semibold small";
@@ -54,6 +65,12 @@ const TRACKED_STATUSES = [
   "Booked",
   "Invalid",
   "Not Interested",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Closed",
+  "Busy",
 ];
 
 function formatStatusLabel(status) {
@@ -240,6 +257,8 @@ export function UserPage() {
       "Remarks",
       "Date & Time",
       "Assigned To",
+      "Project",
+      "Verification Call",
     ];
 
     const escapeCSV = (value) => {
@@ -259,6 +278,8 @@ export function UserPage() {
       user.remarks,
       formatDateTime(user.dob),
       user.Assigned_to,
+      user.project || "",
+      user.verification_call ? "Yes" : "No",
     ]);
 
     const csvLines = [
@@ -508,6 +529,20 @@ export function UserPage() {
                           {user.job_role}
                         </div>
                       )}
+                      {user.verification_call && (
+                        <div className="mt-1">
+                          <span
+                            className="badge rounded-pill"
+                            style={{
+                              backgroundColor: "#f97316",
+                              color: "#fff",
+                              fontSize: "0.65rem",
+                            }}
+                          >
+                            Verification Call
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td>
                       <span className="small text-muted">
@@ -625,8 +660,15 @@ export function UserPage() {
                     validationSchema={leadSchema}
                     onSubmit={async (values, { setSubmitting }) => {
                       try {
-                        await api.put(`/edit-lead/${values.lead_id}`, values);
+                        const res = await api.put(`/edit-lead/${values.lead_id}`, values);
                         toast.success("Lead updated successfully");
+
+                        if (res?.data?.transferredTo) {
+                          toast.success(
+                            `Lead transferred to ${res.data.transferredTo} (Verification Call)`,
+                            { duration: 3500, position: "top-right" }
+                          );
+                        }
 
                         window.dispatchEvent(new Event("leads-updated"));
 
@@ -747,7 +789,7 @@ export function UserPage() {
                                 Details_shared
                               </option>
                               <option value="NR/SF">NR/SF</option>
-                              <option value="Follow Up">Follow Up</option>
+                              <option value="Visit Scheduled">Visit Scheduled</option>
                               <option value="RNR">RNR</option>
                               <option value="Site Visited">Site Visited</option>
                               <option value="Booked">Booked</option>
@@ -755,6 +797,12 @@ export function UserPage() {
                               <option value="Not Interested">
                                 Not Interested
                               </option>
+                              <option value="Location Issue">Location Issue</option>
+                              <option value="CP">CP</option>
+                              <option value="Budget Issue">Budget Issue</option>
+                              <option value="Visit Postponed">Visit Postponed</option>
+                              <option value="Closed">Closed</option>
+                              <option value="Busy">Busy</option>
                             </Field>
                             <ErrorMessage
                               name="status"
@@ -797,10 +845,10 @@ export function UserPage() {
 
                           <div className="col-md-6">
                             <label className="form-label small fw-semibold">
-                              Date of Birth
+                              Date &amp; Time
                             </label>
                             <Field
-                              type="date"
+                              type="datetime-local"
                               name="dob"
                               className="form-control form-control-sm"
                             />

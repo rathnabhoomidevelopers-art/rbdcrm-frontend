@@ -12,8 +12,8 @@ import {
 import { api } from "./api";
 
 /* ===================== CONSTANTS ===================== */
-const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
-const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
+const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
+const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
 
 const DASHBOARD_FOLLOWUP_STATUSES = [
   "Follow Up",
@@ -23,6 +23,11 @@ const DASHBOARD_FOLLOWUP_STATUSES = [
   "RNR",
   "Details_shared",
   "Site Visited",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Busy",
 ];
 
 /* ===================== HELPERS ===================== */
@@ -71,15 +76,7 @@ const normalizeAndValidateMobile = (raw) => {
   if (!/^[6-9]\d{9}$/.test(digits)) {
     return {
       ok: false,
-      error: "Enter a valid mobile number",
-      normalized: digits,
-    };
-  }
-
-  if (/^(\d)\1{9}$/.test(digits)) {
-    return {
-      ok: false,
-      error: "Mobile number looks invalid (repeated digits)",
+      error: "Enter a valid mobile number starting with 6-9",
       normalized: digits,
     };
   }
@@ -345,7 +342,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
-            verification_call: !!l.verification_call, // ✅ NEW
+            verification_call: !!l.verification_call,
           }))
         );
         return;
@@ -374,7 +371,7 @@ export function UserDashboard() {
               remarks: fu.remarks || (lead && lead.remarks) || "",
               Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
               project: fu.project || (lead && lead.project) || "",
-              verification_call: !!(lead && lead.verification_call), // ✅ NEW
+              verification_call: !!(lead && lead.verification_call),
             };
           })
         );
@@ -398,7 +395,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
-            verification_call: !!l.verification_call, // ✅ NEW
+            verification_call: !!l.verification_call,
           }))
         );
         return;
@@ -419,7 +416,7 @@ export function UserDashboard() {
             remarks: l.remarks || "",
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
-            verification_call: !!l.verification_call, // ✅ NEW
+            verification_call: !!l.verification_call,
           }))
         );
         return;
@@ -456,7 +453,7 @@ export function UserDashboard() {
           remarks: fu.remarks || (lead && lead.remarks) || "",
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
-          verification_call: !!(lead && lead.verification_call), // ✅ NEW
+          verification_call: !!(lead && lead.verification_call),
         };
       });
 
@@ -500,7 +497,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
-        verification_call: !!l.verification_call, // ✅ NEW
+        verification_call: !!l.verification_call,
       }));
     } else if (type === "followups") {
       title = "Follow-Up Leads";
@@ -524,7 +521,7 @@ export function UserDashboard() {
           remarks: fu.remarks || (lead && lead.remarks) || "",
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
-          verification_call: !!(lead && lead.verification_call), // ✅ NEW
+          verification_call: !!(lead && lead.verification_call),
         };
       });
     } else if (type === "sitevisits") {
@@ -543,7 +540,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
-        verification_call: !!l.verification_call, // ✅ NEW
+        verification_call: !!l.verification_call,
       }));
     } else if (type === "booked") {
       title = "Booked Leads";
@@ -559,7 +556,7 @@ export function UserDashboard() {
         remarks: l.remarks || "",
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
-        verification_call: !!l.verification_call, // ✅ NEW
+        verification_call: !!l.verification_call,
       }));
     }
 
@@ -593,7 +590,7 @@ export function UserDashboard() {
         remarks: fu.remarks || (lead && lead.remarks) || "",
         Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
         project: fu.project || (lead && lead.project) || "",
-        verification_call: !!(lead && lead.verification_call), // ✅ NEW
+        verification_call: !!(lead && lead.verification_call),
       };
     });
 
@@ -642,9 +639,11 @@ export function UserDashboard() {
       if (field === "status") {
         updated.status = value;
 
-        if (value === "NR/SF" || value === "RNR") {
+        if (value === "NR/SF" || value === "RNR" || value === "Busy") {
           updated.dob = getNowPlus24Hours();
-        } else if (value === "Visit Scheduled" || value === "Details_shared") {
+        } else if (value === "Visit Scheduled" || value === "Details_shared" || 
+                   value === "Location Issue" || value === "CP" || 
+                   value === "Budget Issue" || value === "Visit Postponed") {
           updated.dob = "";
         }
       } else if (field === "dob") {
@@ -1444,6 +1443,12 @@ export function UserDashboard() {
                                         <option value="Booked">Booked</option>
                                         <option value="Invalid">Invalid</option>
                                         <option value="Not Interested">Not Interested</option>
+                                        <option value="Location Issue">Location Issue</option>
+                                        <option value="CP">CP</option>
+                                        <option value="Budget Issue">Budget Issue</option>
+                                        <option value="Visit Postponed">Visit Postponed</option>
+                                        <option value="Closed">Closed</option>
+                                        <option value="Busy">Busy</option>
                                       </select>
                                     ) : (
                                       <div className="d-flex flex-column gap-1">
@@ -1665,6 +1670,12 @@ export function UserDashboard() {
                         <option value="Booked">Booked</option>
                         <option value="Invalid">Invalid</option>
                         <option value="Not Interested">Not Interested</option>
+                        <option value="Location Issue">Location Issue</option>
+                        <option value="CP">CP</option>
+                        <option value="Budget Issue">Budget Issue</option>
+                        <option value="Visit Postponed">Visit Postponed</option>
+                        <option value="Closed">Closed</option>
+                        <option value="Busy">Busy</option>
                       </select>
                     </div>
 

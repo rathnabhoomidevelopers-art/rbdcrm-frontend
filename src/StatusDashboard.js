@@ -13,6 +13,12 @@ const TARGET_STATUSES = [
   "Booked",
   "Invalid",
   "Not Interested",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Closed",
+  "Busy",
 ];
 
 const FOLLOW_UP_STATUSES = [
@@ -22,13 +28,18 @@ const FOLLOW_UP_STATUSES = [
   "Details_shared",
   "Site Visited",
   "Booked",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Busy",
 ];
 
-const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
-const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
+const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
+const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
 
 // ✅ Day-based transfer statuses (backend handles 3-day rule)
-const TRANSFER_STATUSES = ["NR/SF", "RNR", "Not Interested", "Invalid"];
+const TRANSFER_STATUSES = ["NR/SF", "RNR", "Not Interested", "Invalid", "Busy"];
 
 function getConsecutiveSameStatusCount(history, newStatus) {
   if (!newStatus) return 0;
@@ -91,6 +102,42 @@ function getRowBackground(status) {
       return {
         backgroundColor: "#cfe2ff",
         color: "#084298",
+      };
+
+    case "location issue":
+      return {
+        backgroundColor: "#d4edda",
+        color: "#155724",
+      };
+
+    case "cp":
+      return {
+        backgroundColor: "#cce5ff",
+        color: "#004085",
+      };
+
+    case "budget issue":
+      return {
+        backgroundColor: "#fff3cd",
+        color: "#856404",
+      };
+
+    case "visit postponed":
+      return {
+        backgroundColor: "#e2e3e5",
+        color: "#383d41",
+      };
+
+    case "closed":
+      return {
+        backgroundColor: "#f8d7da",
+        color: "#721c24",
+      };
+
+    case "busy":
+      return {
+        backgroundColor: "#f5e6cc",
+        color: "#8a6d3b",
       };
 
     default:
@@ -264,12 +311,16 @@ export function StatusDashboard() {
         if (field === "status") {
           updated.status = value;
 
-          if (value === "NR/SF" || value === "RNR") {
+          if (value === "NR/SF" || value === "RNR" || value === "Busy") {
             updated.date = getTomorrow9AMForInput();
           } else if (
             value === "Details_shared" ||
             value === "Visit Scheduled" ||
-            value === "Site Visited"
+            value === "Site Visited" ||
+            value === "Location Issue" ||
+            value === "CP" ||
+            value === "Budget Issue" ||
+            value === "Visit Postponed"
           ) {
             updated.date = "";
           }
@@ -411,6 +462,15 @@ export function StatusDashboard() {
             );
           }
         }
+
+        setNewRemarkByLead((prev) => ({
+          ...prev,
+          [updatedRow.lead_id]: "",
+        }));
+
+        if (nextLeadId) {
+          setJumpToLeadId(nextLeadId);
+        }
       } else {
         // Non-followup statuses: update lead and remove follow-up (if any)
         const editRes = await api.put(`/edit-lead/${updatedRow.lead_id}`, {
@@ -447,15 +507,15 @@ export function StatusDashboard() {
             );
           }
         }
-      }
 
-      setNewRemarkByLead((prev) => ({
-        ...prev,
-        [updatedRow.lead_id]: "",
-      }));
+        setNewRemarkByLead((prev) => ({
+          ...prev,
+          [updatedRow.lead_id]: "",
+        }));
 
-      if (nextLeadId) {
-        setJumpToLeadId(nextLeadId);
+        if (nextLeadId) {
+          setJumpToLeadId(nextLeadId);
+        }
       }
     } catch (err) {
       console.error("Error updating status / lead", {
@@ -608,7 +668,8 @@ export function StatusDashboard() {
               Leads with statuses{" "}
               <strong>
                 Details_shared, Visit Scheduled, NR/SF, RNR, Site Visited,
-                Booked, Invalid, Not Interested
+                Booked, Invalid, Not Interested, Location Issue, CP, Budget Issue,
+                Visit Postponed, Closed, Busy
               </strong>{" "}
               will automatically appear here once updated from the main leads
               page.
@@ -716,7 +777,7 @@ export function StatusDashboard() {
 
   // Keep the streak badge only for display (not used for transfer)
   let nsrBadgeLabel = "";
-  if (currentRow.status === "NR/SF" || currentRow.status === "RNR") {
+  if (currentRow.status === "NR/SF" || currentRow.status === "RNR" || currentRow.status === "Busy") {
     const streakCount = getConsecutiveSameStatusCount(
       historyForCurrent,
       currentRow.status
@@ -902,6 +963,84 @@ export function StatusDashboard() {
                         width: 14,
                         height: 14,
                         borderRadius: 999,
+                        backgroundColor: "#d4edda",
+                        border: "1px solid #b8e0c7",
+                      }}
+                    />
+                    <span>Location Issue</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        backgroundColor: "#cce5ff",
+                        border: "1px solid #a6d5ff",
+                      }}
+                    />
+                    <span>CP</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        backgroundColor: "#fff3cd",
+                        border: "1px solid #ffec99",
+                      }}
+                    />
+                    <span>Budget Issue</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        backgroundColor: "#e2e3e5",
+                        border: "1px solid #c4c4c6",
+                      }}
+                    />
+                    <span>Visit Postponed</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        backgroundColor: "#f8d7da",
+                        border: "1px solid #f5c2c7",
+                      }}
+                    />
+                    <span>Closed</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
+                        backgroundColor: "#f5e6cc",
+                        border: "1px solid #f0d9b5",
+                      }}
+                    />
+                    <span>Busy</span>
+                  </span>
+
+                  <span className="d-inline-flex align-items-center gap-1">
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: 999,
                         backgroundColor: "#f8d7da",
                         border: "1px solid #f5c2c7",
                       }}
@@ -982,6 +1121,12 @@ export function StatusDashboard() {
                       <option value="Booked">Booked</option>
                       <option value="Invalid">Invalid</option>
                       <option value="Not Interested">Not Interested</option>
+                      <option value="Location Issue">Location Issue</option>
+                      <option value="CP">CP</option>
+                      <option value="Budget Issue">Budget Issue</option>
+                      <option value="Visit Postponed">Visit Postponed</option>
+                      <option value="Closed">Closed</option>
+                      <option value="Busy">Busy</option>
                     </select>
                   </div>
 
@@ -1097,7 +1242,24 @@ export function StatusDashboard() {
                       {currentRow.status || "No Status"}
                     </span>
 
-                    {/* NR/SF / RNR streak badge */}
+                    {/* Verification call badge */}
+                    {currentRow.verification_call && (
+                      <div className="mt-1">
+                        <span
+                          className="badge rounded-pill"
+                          style={{
+                            fontSize: "0.65rem",
+                            backgroundColor: "#f97316",
+                            color: "#fff",
+                            border: "1px solid #ea580c",
+                          }}
+                        >
+                          Verification Call
+                        </span>
+                      </div>
+                    )}
+
+                    {/* NR/SF / RNR / Busy streak badge */}
                     {nsrBadgeLabel && (
                       <div className="mt-1">
                         <span
@@ -1215,6 +1377,12 @@ export function StatusDashboard() {
                       <option value="Booked">Booked</option>
                       <option value="Invalid">Invalid</option>
                       <option value="Not Interested">Not Interested</option>
+                      <option value="Location Issue">Location Issue</option>
+                      <option value="CP">CP</option>
+                      <option value="Budget Issue">Budget Issue</option>
+                      <option value="Visit Postponed">Visit Postponed</option>
+                      <option value="Closed">Closed</option>
+                      <option value="Busy">Busy</option>
                     </select>
 
                     <label className="form-label small text-muted mt-3">
@@ -1237,7 +1405,8 @@ export function StatusDashboard() {
                     />
                     <div className="form-text small">
                       {currentRow.status === "NR/SF" ||
-                      currentRow.status === "RNR"
+                      currentRow.status === "RNR" ||
+                      currentRow.status === "Busy"
                         ? "Date is auto-set to tomorrow 09:00 AM and locked."
                         : currentRow.status === "Visit Scheduled"
                         ? "For Visit Scheduled, please select exact date & time before saving."

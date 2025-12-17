@@ -11,6 +11,12 @@ const TRACKED_STATUSES = [
   "Booked",
   "Invalid",
   "Not Interested",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Closed",
+  "Busy",
 ];
 
 const PROJECT_OPTIONS = ["Northern Lights", "Gruhakalpa", "Nandi Hill View"];

@@ -12,7 +12,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "8h";
 const PORT = process.env.PORT || 3000;
 
-// These match the frontend logic
+// These match the frontend logic - UPDATED WITH NEW STATUSES
 const TRACKED_STATUSES = [
   "Visit Scheduled",
   "NR/SF",
@@ -20,6 +20,12 @@ const TRACKED_STATUSES = [
   "Details_shared",
   "Site Visited",
   "Booked",
+  "Location Issue", // NEW
+  "CP", // NEW
+  "Budget Issue", // NEW
+  "Visit Postponed", // NEW
+  "Busy", // NEW
+  "Closed", // NEW
 ];
 
 const logRequest = (req, res, next) => {
@@ -316,6 +322,18 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     return res.status(400).json({ message: "Mobile number is required" });
   }
 
+  // Mobile validation - less strict
+  let digits = mobile.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 11 && digits.startsWith("0")) {
+    digits = digits.slice(1);
+  }
+  if (digits.length !== 10 || !/^[6-9]\d{9}$/.test(digits)) {
+    return res.status(400).json({ message: "Enter a valid 10-digit mobile number starting with 6-9" });
+  }
+
   let clientObj;
   try {
     clientObj = await mongoClient.connect(connectionString);
@@ -323,7 +341,7 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     const leadsCol = database.collection("leads");
     const followUpsCol = database.collection("follow-ups");
 
-    const existing = await leadsCol.findOne({ mobile });
+    const existing = await leadsCol.findOne({ mobile: digits });
     if (existing) {
       return res.status(409).json({
         message: "Lead with this mobile number already exists",
@@ -332,27 +350,38 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       });
     }
 
+    // Handle date for Busy status
+    let dob = req.body.dob ? new Date(req.body.dob) : null;
+    if (req.body.status === "Busy" && !dob) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      dob = tomorrow;
+    }
+
     const lead = {
       lead_id: new ObjectId().toHexString(),
       name: req.body.name || null,
-      mobile,
+      mobile: digits,
       source: req.body.source || null,
       status: req.body.status || null,
       job_role: req.body.job_role || null,
       budget: req.body.budget || null,
       project: req.body.project || null,
       remarks: req.body.remarks || null,
-      dob: req.body.dob ? new Date(req.body.dob) : null,
+      dob: dob,
       Assigned_to: assignedRaw
         ? assignedRaw.toString().trim().toLowerCase()
         : null,
       createdAt: new Date(),
+      verification_call: false,
+      original_assigned: null,
     };
 
     await leadsCol.insertOne(lead);
     console.log("Lead added successfully!..");
 
-    // NEW: auto-create follow-up if status is tracked (same rule as frontend)
+    // Auto-create follow-up if status is tracked
     if (lead.status && TRACKED_STATUSES.includes(lead.status)) {
       const followUpDate = lead.dob || new Date();
 
@@ -360,7 +389,7 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
         followup_id: lead.lead_id,
         date: followUpDate,
         name: lead.name || null,
-        mobile: lead.mobile ? parseInt(lead.mobile, 10) : null,
+        mobile: parseInt(lead.mobile, 10) || null,
         source: lead.source || null,
         status: lead.status || null,
         job_role: lead.job_role || null,
@@ -388,10 +417,10 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
 /**
  * 🔧 UPDATED: /edit-lead
  * - TRUE PARTIAL UPDATE (keeps Assigned_to unless explicitly provided)
- * ✅ NEW: keeps follow-ups collection in sync:
- *    - if status/date changes: update follow-up record too
- *    - if status becomes NOT tracked: delete follow-up record
- *    - if status becomes tracked but follow-up missing: create it
+ * ✅ NEW: Transfer logic for Busy status (same as NR/SF, RNR)
+ * ✅ NEW: Verification call badge when transferred
+ * ✅ NEW: Tracks consecutive days of Busy status
+ * ✅ NEW: Return to original assignee when verification call is completed
  */
 app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
   const leadId = req.params.id;
@@ -440,14 +469,167 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const database = clientObj.db("crm");
     const leadsCol = database.collection("leads");
     const followUpsCol = database.collection("follow-ups");
+    const usersCol = database.collection("users");
 
     // First read the existing lead (needed to build correct follow-up update)
-    const existingLead =
-      (await leadsCol.findOne({ $or: orFilters })) || null;
+    const existingLead = await leadsCol.findOne({ $or: orFilters });
 
     if (!existingLead) {
       console.log("Lead not found for id:", leadId);
       return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Check if status is being changed to Busy
+    const newStatus = update.status;
+    const oldStatus = existingLead.status;
+    const isBusyStatus = newStatus === "Busy";
+    const wasBusyStatus = oldStatus === "Busy";
+
+    // Get current user info for transfer logic
+    const currentUser = req.user.user_name || "";
+    
+    // Initialize response data
+    let responseData = { message: "Lead updated successfully" };
+    let transferredTo = null;
+
+    // --- TRANSFER LOGIC FOR BUSY STATUS ---
+    if (isBusyStatus) {
+      // Check for consecutive Busy status entries in follow-ups
+      const followUpHistory = await followUpsCol
+        .find({ 
+          followup_id: existingLead.lead_id, 
+          status: "Busy" 
+        })
+        .sort({ date: -1 })
+        .limit(3)
+        .toArray();
+
+      // Count consecutive Busy statuses (including this new one)
+      const consecutiveBusyCount = followUpHistory.length + 1;
+      
+      console.log(`Busy status count: ${consecutiveBusyCount} for lead ${existingLead.lead_id}`);
+
+      // If this is the 3rd consecutive Busy status, transfer to another user
+      if (consecutiveBusyCount >= 3) {
+        // Get all users except current one
+        const allUsers = await usersCol
+          .find({ 
+            user_name: { $ne: currentUser },
+            role: "user" 
+          })
+          .toArray();
+
+        if (allUsers.length > 0) {
+          // Find users sorted by lead count (to distribute evenly)
+          const userLeadCounts = await Promise.all(
+            allUsers.map(async (user) => {
+              const count = await leadsCol.countDocuments({
+                Assigned_to: user.user_name,
+                verification_call: { $ne: true }
+              });
+              return { user, count };
+            })
+          );
+
+          // Sort by lead count (ascending) to give to least busy user
+          userLeadCounts.sort((a, b) => a.count - b.count);
+          
+          const nextUser = userLeadCounts[0].user;
+          transferredTo = nextUser.user_name;
+
+          // Update lead with transfer
+          update.Assigned_to = transferredTo;
+          update.verification_call = true;
+          update.original_assigned = existingLead.Assigned_to; // Store original assignee
+          update.transfer_date = new Date();
+
+          console.log(`Lead ${existingLead.lead_id} transferred to ${transferredTo} due to 3 consecutive Busy statuses`);
+          
+          // Add to response
+          responseData.transferredTo = transferredTo;
+          responseData.message = `Lead updated and transferred to ${transferredTo} (Verification Call)`;
+        }
+      } else {
+        // Set date to tomorrow 9 AM for Busy status if not already set
+        if (!update.dob) {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(9, 0, 0, 0);
+          update.dob = tomorrow;
+        }
+      }
+    }
+
+    // Check if this is a verification call being updated
+    if (existingLead.verification_call && newStatus && newStatus !== "Busy") {
+      // If verification call is completed (status changed from Busy to something else),
+      // return lead to original assignee
+      if (existingLead.original_assigned) {
+        update.Assigned_to = existingLead.original_assigned;
+        update.verification_call = false;
+        update.original_assigned = null;
+        
+        console.log(`Lead ${existingLead.lead_id} returned to original assignee: ${existingLead.original_assigned}`);
+        
+        responseData.returnedTo = existingLead.original_assigned;
+        responseData.message = `Lead updated and returned to ${existingLead.original_assigned}`;
+      }
+    }
+
+    // Also handle NR/SF and RNR transfers (existing logic)
+    if ((newStatus === "NR/SF" || newStatus === "RNR") && !existingLead.verification_call) {
+      // Check for consecutive status entries in follow-ups
+      const followUpHistory = await followUpsCol
+        .find({ 
+          followup_id: existingLead.lead_id, 
+          status: newStatus 
+        })
+        .sort({ date: -1 })
+        .limit(3)
+        .toArray();
+
+      // Count consecutive statuses (including this new one)
+      const consecutiveCount = followUpHistory.length + 1;
+      
+      if (consecutiveCount >= 3) {
+        // Get all users except current one
+        const allUsers = await usersCol
+          .find({ 
+            user_name: { $ne: currentUser },
+            role: "user" 
+          })
+          .toArray();
+
+        if (allUsers.length > 0) {
+          // Find users sorted by lead count
+          const userLeadCounts = await Promise.all(
+            allUsers.map(async (user) => {
+              const count = await leadsCol.countDocuments({
+                Assigned_to: user.user_name,
+                verification_call: { $ne: true }
+              });
+              return { user, count };
+            })
+          );
+
+          userLeadCounts.sort((a, b) => a.count - b.count);
+          
+          const nextUser = userLeadCounts[0].user;
+          transferredTo = nextUser.user_name;
+
+          // Update lead with transfer
+          update.Assigned_to = transferredTo;
+          update.verification_call = true;
+          update.original_assigned = existingLead.Assigned_to;
+          update.transfer_date = new Date();
+
+          console.log(`Lead ${existingLead.lead_id} transferred to ${transferredTo} due to 3 consecutive ${newStatus} statuses`);
+          
+          // Add to response
+          responseData.transferredTo = transferredTo;
+          responseData.message = `Lead updated and transferred to ${transferredTo} (Verification Call)`;
+        }
+      }
     }
 
     // Update lead
@@ -462,10 +644,9 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const nextLead = { ...existingLead, ...update };
 
     // --- FOLLOW-UP SYNC LOGIC ---
-    // Determine the lead primary id used by follow-ups
     const followupId = nextLead.lead_id || existingLead.lead_id;
-
     const nextStatus = nextLead.status || null;
+    
     const isTracked = !!(nextStatus && TRACKED_STATUSES.includes(nextStatus));
 
     if (!isTracked) {
@@ -500,7 +681,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     }
 
     console.log("Lead updated successfully + follow-up synced!..");
-    return res.status(200).json({ message: "Lead updated successfully" });
+    return res.status(200).json(responseData);
   } catch (err) {
     console.error("Error updating lead", err);
     return res.status(500).json({ message: "Error updating lead" });
@@ -545,6 +726,12 @@ app.post("/statuslist", auth(["admin"]), (req, res) => {
     Invalid: req.body.Invalid === "true",
     NR_SF: req.body.NR_SF === "true",
     Others: req.body.Others === "true",
+    Location_Issue: req.body.Location_Issue === "true", // NEW
+    CP: req.body.CP === "true", // NEW
+    Budget_Issue: req.body.Budget_Issue === "true", // NEW
+    Visit_Postponed: req.body.Visit_Postponed === "true", // NEW
+    Busy: req.body.Busy === "true", // NEW
+    Closed: req.body.Closed === "true", // NEW
   };
 
   mongoClient
@@ -578,7 +765,7 @@ app.get("/status", auth(["admin", "user"]), (req, res) => {
         .then((document) => res.status(200).json(document))
         .finally(() => clientObj.close());
     })
-    .catch((err) => {
+    .catch((err) {
       console.error("Status fetch error", err);
       return res.status(500).json({ message: "Database connection failed!" });
     });
@@ -699,7 +886,7 @@ app.get("/follow-up/:id", auth(["admin", "user"]), (req, res) => {
         })
         .finally(() => clientObj.close());
     })
-    .catch((err) => {
+    .catch((err) {
       console.error("DB connection error", err);
       return res.status(500).json({ message: "Database connection failed" });
     });

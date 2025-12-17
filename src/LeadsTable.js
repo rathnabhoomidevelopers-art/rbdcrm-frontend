@@ -10,11 +10,16 @@ const TRACKED_STATUSES = [
   "Details_shared",
   "Site Visited",
   "Booked",
+  "Location Issue",
+  "CP",
+  "Budget Issue",
+  "Visit Postponed",
+  "Busy",
 ];
 
-const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited"];
+const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
 
-const HARD_LOCK_STATUSES = ["NR/SF", "RNR"];
+const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
 
 const SOURCE_OPTIONS = [
   "Google Ads",
@@ -56,15 +61,7 @@ const normalizeAndValidateMobile = (raw) => {
   if (!/^[6-9]\d{9}$/.test(digits)) {
     return {
       ok: false,
-      error: "Enter a valid mobile number!.",
-      normalized: digits,
-    };
-  }
-
-  if (/^(\d)\1{9}$/.test(digits)) {
-    return {
-      ok: false,
-      error: "Mobile number looks invalid (repeated digits)",
+      error: "Enter a valid mobile number starting with 6-9",
       normalized: digits,
     };
   }
@@ -206,10 +203,12 @@ export function LeadsTable() {
         if (field === "status") {
           updated.status = value;
 
-          if (value === "NR/SF" || value === "RNR") {
+          if (value === "NR/SF" || value === "RNR" || value === "Busy") {
             // auto-set to tomorrow 09:00 AM
             updated.dob = getTomorrow9AMForInput();
-          } else if (value === "Visit Scheduled" || value === "Details_shared") {
+          } else if (value === "Visit Scheduled" || value === "Details_shared" || 
+                     value === "Location Issue" || value === "CP" || 
+                     value === "Budget Issue" || value === "Visit Postponed") {
             updated.dob = "";
           }
         } else if (field === "dob") {
@@ -272,7 +271,7 @@ export function LeadsTable() {
     const assignedToFinal = getAssignedToValue(lead.Assigned_to);
 
     try {
-      await api.put(`/edit-lead/${lead.lead_id}`, {
+      const res = await api.put(`/edit-lead/${lead.lead_id}`, {
         name: lead.name || null,
         source: lead.source || null,
         status: statusToSave || null,
@@ -283,6 +282,14 @@ export function LeadsTable() {
         dob: dobToSave || null,
         Assigned_to: assignedToFinal || null,
       });
+
+      // Check if lead was transferred
+      if (res?.data?.transferredTo) {
+        toast.success(
+          `Lead transferred to ${res.data.transferredTo} (Verification Call)`,
+          { duration: 3500, position: "top-right" }
+        );
+      }
 
       if (TRACKED_STATUSES.includes(statusToSave)) {
         const followUpDate = dobToSave || getTomorrow9AMForInput();
@@ -309,6 +316,7 @@ export function LeadsTable() {
                 status: statusToSave,
                 dob: dobToSave,
                 Assigned_to: assignedToFinal,
+                verification_call: res?.data?.transferredTo ? true : l.verification_call,
               }
             : l
         )
@@ -374,10 +382,12 @@ export function LeadsTable() {
       if (field === "status") {
         updated.status = value;
 
-        if (value === "NR/SF" || value === "RNR") {
+        if (value === "NR/SF" || value === "RNR" || value === "Busy") {
           // auto-set to tomorrow 09:00 AM
           updated.dob = getTomorrow9AMForInput();
-        } else if (value === "Visit Scheduled" || value === "Details_shared") {
+        } else if (value === "Visit Scheduled" || value === "Details_shared" || 
+                   value === "Location Issue" || value === "CP" || 
+                   value === "Budget Issue" || value === "Visit Postponed") {
           updated.dob = "";
         }
       } else if (field === "dob") {
@@ -706,6 +716,12 @@ export function LeadsTable() {
                 <span className="font-mono text-slate-700">
                   {currentLead.lead_id}
                 </span>
+                {currentLead.verification_call && (
+                  <span className="ml-2 inline-flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full bg-orange-500"></span>
+                    <span className="text-xs font-medium text-orange-600">Verification Call</span>
+                  </span>
+                )}
               </p>
             </div>
             <div className="text-right text-[11px] text-slate-500">
@@ -786,6 +802,12 @@ export function LeadsTable() {
                   <option value="Booked">Booked</option>
                   <option value="Invalid">Invalid</option>
                   <option value="Not Interested">Not Interested</option>
+                  <option value="Location Issue">Location Issue</option>
+                  <option value="CP">CP</option>
+                  <option value="Budget Issue">Budget Issue</option>
+                  <option value="Visit Postponed">Visit Postponed</option>
+                  <option value="Closed">Closed</option>
+                  <option value="Busy">Busy</option>
                 </select>
               </div>
 
@@ -808,7 +830,8 @@ export function LeadsTable() {
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
                   {currentLead.status === "NR/SF" ||
-                  currentLead.status === "RNR"
+                  currentLead.status === "RNR" ||
+                  currentLead.status === "Busy"
                     ? "Date is auto-set to tomorrow 09:00 AM and locked."
                     : "For Visit Scheduled, please select exact date & time. For other follow-up statuses, leaving this empty will auto-set to tomorrow 09:00 AM on save."}
                 </p>
@@ -972,7 +995,7 @@ export function LeadsTable() {
               >
                 {savingId === currentLead.lead_id
                   ? "Saving..."
-                  : hasNext
+                 : hasNext
                   ? "Save & Next"
                   : "Save"}
               </button>
@@ -1083,6 +1106,12 @@ function AddLeadModal({
                 <option value="Booked">Booked</option>
                 <option value="Invalid">Invalid</option>
                 <option value="Not Interested">Not Interested</option>
+                <option value="Location Issue">Location Issue</option>
+                <option value="CP">CP</option>
+                <option value="Budget Issue">Budget Issue</option>
+                <option value="Visit Postponed">Visit Postponed</option>
+                <option value="Closed">Closed</option>
+                <option value="Busy">Busy</option>
               </select>
             </div>
 
@@ -1152,7 +1181,7 @@ function AddLeadModal({
                 disabled={HARD_LOCK_STATUSES.includes(newLead.status)}
               />
               <p className="text-[11px] text-slate-500 mt-1">
-                For NR/SF or RNR, the date will be auto-set to tomorrow 09:00 AM
+                For NR/SF, RNR or Busy, the date will be auto-set to tomorrow 09:00 AM
                 and locked if left empty. For Visit Scheduled, please select
                 exact date &amp; time.
               </p>
@@ -1459,7 +1488,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
               </li>
               <li>
                 For auto follow-up statuses (NR/SF, RNR, Details_shared, Site
-                Visited), if dob is empty, it will be auto-set to tomorrow
+                Visited, Busy), if dob is empty, it will be auto-set to tomorrow
                 09:00 AM.
               </li>
             </ul>
