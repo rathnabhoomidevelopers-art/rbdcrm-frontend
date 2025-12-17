@@ -8,6 +8,9 @@ import {
   PhoneCall,
   RefreshCw,
   CircleXIcon,
+  MessageSquareText,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -42,7 +45,7 @@ const DASHBOARD_FOLLOWUP_STATUSES = [
   "Budget Issue",
   "Visit Postponed",
   "Busy",
-  "Closed", // ✅ Included
+  "Closed",
 ];
 
 /* ===================== HELPERS ===================== */
@@ -144,6 +147,9 @@ export function UserDashboard() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [editRowData, setEditRowData] = useState(null);
 
+  // ✅ NEW: toggle to show previous remarks (only for the currently edited row)
+  const [showPrevRemarks, setShowPrevRemarks] = useState(false);
+
   const role = localStorage.getItem("role");
   const username = (localStorage.getItem("username") || "")
     .toString()
@@ -207,9 +213,7 @@ export function UserDashboard() {
       );
 
       const totalFollowUps = onlyFollowUps.length;
-
       const totalSiteVisits = leads.filter((l) => l.status === "Site Visited").length;
-
       const totalBooked = leads.filter((l) => l.status === "Booked").length;
 
       const now = new Date();
@@ -557,6 +561,7 @@ export function UserDashboard() {
     setModalOpen(true);
     setEditingRowId(null);
     setEditRowData(null);
+    setShowPrevRemarks(false);
   };
 
   const openGroupModal = (bucketLabel, assignedTo, status, items) => {
@@ -590,6 +595,7 @@ export function UserDashboard() {
     setModalOpen(true);
     setEditingRowId(null);
     setEditRowData(null);
+    setShowPrevRemarks(false);
   };
 
   const closeModal = () => {
@@ -599,6 +605,7 @@ export function UserDashboard() {
     setEditingRowId(null);
     setEditRowData(null);
     setModalContext(null);
+    setShowPrevRemarks(false);
   };
 
   const openAddLeadModal = () => {
@@ -710,20 +717,26 @@ export function UserDashboard() {
     }
   };
 
+  // ✅ UPDATED: remarks textbox should start empty; previous remarks shown only on click
   const startEditRow = (row) => {
     const rowId = row.leadKey || row.id;
     setEditingRowId(rowId);
+    setShowPrevRemarks(false);
+
     setEditRowData({
       ...row,
       leadKey: rowId,
       date: row.date ? toLocalInputValue(row.date) : "",
-      source: row.source || "", // ✅ ensure source exists in edit data
+      source: row.source || "",
+      prevRemarks: row.remarks || "", // ✅ store old remarks separately
+      remarks: "", // ✅ keep textarea empty
     });
   };
 
   const cancelEditRow = () => {
     setEditingRowId(null);
     setEditRowData(null);
+    setShowPrevRemarks(false);
   };
 
   const handleEditRowChange = (field, value) => {
@@ -748,11 +761,14 @@ export function UserDashboard() {
     if (!editRowData || !editingRowId) return;
 
     try {
+      const newRemarks = (editRowData.remarks || "").trim();
+
       const payload = {
         status: editRowData.status || null,
-        remarks: editRowData.remarks || null,
+        // ✅ only send new remarks (empty => null)
+        remarks: newRemarks ? newRemarks : null,
         project: editRowData.project || null,
-        source: editRowData.source || null, // ✅ SEND SOURCE UPDATE
+        source: editRowData.source || null,
         dob: editRowData.date || null,
         Assigned_to: editRowData.Assigned_to || null,
       };
@@ -817,7 +833,6 @@ export function UserDashboard() {
       `}</style>
 
       <div className="container-xl" style={{ maxWidth: "1500px" }}>
-        {/* ✅ datalist: dropdown suggestions + allow typing custom source */}
         <datalist id="source-options">
           {SOURCE_OPTIONS.map((s) => (
             <option key={s} value={s} />
@@ -1078,23 +1093,27 @@ export function UserDashboard() {
                           Overdue follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(overdueUserGroups).map(([assignedTo, statusMap], idxUser) => (
-                            <div key={`${assignedTo}-${idxUser}`} className="mb-2">
-                              <div className="fw-semibold">{assignedTo}</div>
-                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                  <button
-                                    key={`${assignedTo}-${status}-${idxStatus}`}
-                                    type="button"
-                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
-                                    onClick={() => openGroupModal("Overdue", assignedTo, status, list)}
-                                  >
-                                    {status}: <strong>{list.length}</strong>
-                                  </button>
-                                ))}
+                          {Object.entries(overdueUserGroups).map(
+                            ([assignedTo, statusMap], idxUser) => (
+                              <div key={`${assignedTo}-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
+                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                    <button
+                                      key={`${assignedTo}-${status}-${idxStatus}`}
+                                      type="button"
+                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
+                                      onClick={() =>
+                                        openGroupModal("Overdue", assignedTo, status, list)
+                                      }
+                                    >
+                                      {status}: <strong>{list.length}</strong>
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          )}
                         </div>
                       </>
                     )}
@@ -1145,23 +1164,27 @@ export function UserDashboard() {
                           Today&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(todayUserGroups).map(([assignedTo, statusMap], idxUser) => (
-                            <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
-                              <div className="fw-semibold">{assignedTo}</div>
-                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                  <button
-                                    key={`${assignedTo}-today-${status}-${idxStatus}`}
-                                    type="button"
-                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
-                                    onClick={() => openGroupModal("Today", assignedTo, status, list)}
-                                  >
-                                    {status}: <strong>{list.length}</strong>
-                                  </button>
-                                ))}
+                          {Object.entries(todayUserGroups).map(
+                            ([assignedTo, statusMap], idxUser) => (
+                              <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
+                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                    <button
+                                      key={`${assignedTo}-today-${status}-${idxStatus}`}
+                                      type="button"
+                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
+                                      onClick={() =>
+                                        openGroupModal("Today", assignedTo, status, list)
+                                      }
+                                    >
+                                      {status}: <strong>{list.length}</strong>
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          )}
                         </div>
                       </>
                     )}
@@ -1212,25 +1235,27 @@ export function UserDashboard() {
                           Tomorrow&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(tomorrowUserGroups).map(([assignedTo, statusMap], idxUser) => (
-                            <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
-                              <div className="fw-semibold">{assignedTo}</div>
-                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                  <button
-                                    key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
-                                    type="button"
-                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
-                                    onClick={() =>
-                                      openGroupModal("Tomorrow", assignedTo, status, list)
-                                    }
-                                  >
-                                    {status}: <strong>{list.length}</strong>
-                                  </button>
-                                ))}
+                          {Object.entries(tomorrowUserGroups).map(
+                            ([assignedTo, statusMap], idxUser) => (
+                              <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
+                                <div className="fw-semibold">{assignedTo}</div>
+                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                    <button
+                                      key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
+                                      type="button"
+                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
+                                      onClick={() =>
+                                        openGroupModal("Tomorrow", assignedTo, status, list)
+                                      }
+                                    >
+                                      {status}: <strong>{list.length}</strong>
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          )}
                         </div>
                       </>
                     )}
@@ -1294,6 +1319,7 @@ export function UserDashboard() {
                               <th style={{ width: "12%" }}>Actions</th>
                             </tr>
                           </thead>
+
                           <tbody>
                             {modalRows.map((row, idx) => {
                               const rowKey = row.leadKey || row.id;
@@ -1392,16 +1418,58 @@ export function UserDashboard() {
                                     )}
                                   </td>
 
+                                  {/* ✅ UPDATED REMARKS UX */}
                                   <td>
                                     {isEditing ? (
-                                      <textarea
-                                        rows={2}
-                                        className="form-control form-control-sm"
-                                        value={editRowData.remarks || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("remarks", e.target.value)
-                                        }
-                                      />
+                                      <div className="d-flex flex-column gap-1">
+                                        <div className="d-flex align-items-center justify-content-between gap-2">
+                                          {/* textarea starts empty */}
+                                          <textarea
+                                            rows={2}
+                                            className="form-control form-control-sm"
+                                            value={editRowData.remarks || ""}
+                                            onChange={(e) =>
+                                              handleEditRowChange("remarks", e.target.value)
+                                            }
+                                            placeholder="Type new remark..."
+                                          />
+
+                                          {/* small button/icon to show previous remarks */}
+                                          <button
+                                            type="button"
+                                            className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
+                                            style={{ whiteSpace: "nowrap" }}
+                                            onClick={() => setShowPrevRemarks((v) => !v)}
+                                            disabled={!editRowData?.prevRemarks}
+                                            title="Show previous remarks"
+                                          >
+                                            <MessageSquareText size={14} />
+                                            {showPrevRemarks ? (
+                                              <ChevronUp size={14} />
+                                            ) : (
+                                              <ChevronDown size={14} />
+                                            )}
+                                          </button>
+                                        </div>
+
+                                        {showPrevRemarks && !!editRowData?.prevRemarks && (
+                                          <div
+                                            className="small text-muted"
+                                            style={{
+                                              background: "#f8fafc",
+                                              border: "1px solid #e2e8f0",
+                                              borderRadius: 8,
+                                              padding: "8px 10px",
+                                              whiteSpace: "pre-wrap",
+                                            }}
+                                          >
+                                            <div className="fw-semibold text-dark mb-1">
+                                              Previous remarks
+                                            </div>
+                                            {editRowData.prevRemarks}
+                                          </div>
+                                        )}
+                                      </div>
                                     ) : (
                                       <span className="small text-muted">{row.remarks || "—"}</span>
                                     )}
@@ -1492,7 +1560,7 @@ export function UserDashboard() {
           </>
         )}
 
-        {/* Add Lead Modal */}
+        {/* Add Lead Modal (unchanged) */}
         {showAddModal && (
           <div className="fixed inset-0 z-50 d-flex align-items-center justify-content-center bg-black bg-opacity-25">
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>
@@ -1550,7 +1618,6 @@ export function UserDashboard() {
                       />
                     </div>
 
-                    {/* ✅ Source: dropdown suggestions + allow typing custom */}
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Source</label>
                       <input
