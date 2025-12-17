@@ -42,7 +42,7 @@ const DASHBOARD_FOLLOWUP_STATUSES = [
   "Budget Issue",
   "Visit Postponed",
   "Busy",
-  "Closed", // ✅ Added as requested
+  "Closed", // ✅ Included
 ];
 
 /* ===================== HELPERS ===================== */
@@ -209,9 +209,8 @@ export function UserDashboard() {
 
       const totalFollowUps = onlyFollowUps.length;
 
-      const totalSiteVisits = leads.filter(
-        (l) => l.status === "Site Visited"
-      ).length;
+      const totalSiteVisits = leads.filter((l) => l.status === "Site Visited")
+        .length;
 
       const totalBooked = leads.filter((l) => l.status === "Booked").length;
 
@@ -241,7 +240,8 @@ export function UserDashboard() {
 
         if (d < startOfToday) overdue.push(fu);
         else if (d >= startOfToday && d < startOfTomorrow) today.push(fu);
-        else if (d >= startOfTomorrow && d < startOfDayAfterTomorrow) tomorrow.push(fu);
+        else if (d >= startOfTomorrow && d < startOfDayAfterTomorrow)
+          tomorrow.push(fu);
       });
 
       const sortByDate = (arr) =>
@@ -308,8 +308,7 @@ export function UserDashboard() {
       const key = fu.followup_id || fu.lead_id || fu._id;
       const lead = leadIndex[key];
 
-      const assignedRaw =
-        lead && lead.Assigned_to ? lead.Assigned_to : "Unassigned";
+      const assignedRaw = lead && lead.Assigned_to ? lead.Assigned_to : "Unassigned";
       const assigned = (assignedRaw || "").trim() || "Unassigned";
 
       const st = (lead && lead.status) || fu.status || "Unknown";
@@ -383,9 +382,7 @@ export function UserDashboard() {
 
       if (type === "sitevisits") {
         setModalTitle("Site Visit Leads");
-        const filtered = (leadsData || []).filter(
-          (l) => l.status === "Site Visited"
-        );
+        const filtered = (leadsData || []).filter((l) => l.status === "Site Visited");
         setModalRows(
           filtered.map((l) => ({
             id: l.lead_id || l._id,
@@ -817,6 +814,11 @@ export function UserDashboard() {
           "radial-gradient(circle at top, #e0f2ff 0, #f3f4f6 45%, #eef1f4 100%)",
       }}
     >
+      <style>{`
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+
       <div className="container-xl" style={{ maxWidth: "1500px" }}>
         {/* HEADER */}
         <div className="row mb-4">
@@ -901,21 +903,108 @@ export function UserDashboard() {
           </div>
         </div>
 
-        {/* --- YOUR EXISTING UI BELOW (UNCHANGED) --- */}
-        {/* NOTE: I’m keeping your existing content as-is. */}
-        {/* Follow-up Alerts Section + Summary Cards + Modal + Add Lead Modal */}
-        {/* The only changes are inside: Edit modal table (source) and Add lead modal (source). */}
+        {/* SUMMARY CARDS */}
+        <div className="row g-3 mb-4">
+          <div className="col-12 col-md-6 col-xl-3">
+            <div
+              className="card border-0 shadow-sm h-100"
+              style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+              onClick={() => openModal("leads")}
+            >
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#e0f2fe" }}
+                >
+                  <Users size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Total Leads</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.totalLeads}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        {/* Follow-up Alerts Section */}
+          <div className="col-12 col-md-6 col-xl-3">
+            <div
+              className="card border-0 shadow-sm h-100"
+              style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+              onClick={() => openModal("followups")}
+            >
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#fff3cd" }}
+                >
+                  <PhoneCall size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Follow-Ups</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.totalFollowUps}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-12 col-md-6 col-xl-3">
+            <div
+              className="card border-0 shadow-sm h-100"
+              style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+              onClick={() => openModal("sitevisits")}
+            >
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#cfe2ff" }}
+                >
+                  <MapPinCheck size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Site Visits</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.totalSiteVisits}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="col-12 col-md-6 col-xl-3">
+            <div
+              className="card border-0 shadow-sm h-100"
+              style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+              onClick={() => openModal("booked")}
+            >
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#d1e7dd" }}
+                >
+                  <ClipboardList size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Booked</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.totalBooked}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* FOLLOW-UP ALERTS SECTION */}
         <div className="row g-3 mb-4">
           {followUpAlerts.overdue.length === 0 &&
           followUpAlerts.today.length === 0 &&
           followUpAlerts.tomorrow.length === 0 ? (
             <div className="col-12">
-              <div
-                className="card border-0 shadow-sm"
-                style={{ borderRadius: "1.1rem", minHeight: 120 }}
-              >
+              <div className="card border-0 shadow-sm" style={{ borderRadius: "1.1rem" }}>
                 <div className="card-body d-flex align-items-center gap-3 py-4 px-4">
                   <div
                     className="d-inline-flex align-items-center justify-content-center rounded-circle"
@@ -943,7 +1032,7 @@ export function UserDashboard() {
           ) : (
             <>
               {/* Overdue */}
-              <div className="col-12">
+              <div className="col-12 col-xl-4">
                 <div
                   className="card h-100 border-0 shadow-sm"
                   style={{
@@ -979,29 +1068,23 @@ export function UserDashboard() {
                           Overdue follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(overdueUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(
-                                    ([status, list], idxStatus) => (
-                                      <button
-                                        key={`${assignedTo}-${status}-${idxStatus}`}
-                                        type="button"
-                                        className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
-                                        onClick={() =>
-                                          openGroupModal("Overdue", assignedTo, status, list)
-                                        }
-                                      >
-                                        {status}: <strong>{list.length}</strong>
-                                      </button>
-                                    )
-                                  )}
-                                </div>
+                          {Object.entries(overdueUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
+                                    onClick={() => openGroupModal("Overdue", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1010,7 +1093,7 @@ export function UserDashboard() {
               </div>
 
               {/* Today */}
-              <div className="col-12">
+              <div className="col-12 col-xl-4">
                 <div
                   className="card h-100 border-0 shadow-sm"
                   style={{
@@ -1046,29 +1129,23 @@ export function UserDashboard() {
                           Today&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(todayUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(
-                                    ([status, list], idxStatus) => (
-                                      <button
-                                        key={`${assignedTo}-today-${status}-${idxStatus}`}
-                                        type="button"
-                                        className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
-                                        onClick={() =>
-                                          openGroupModal("Today", assignedTo, status, list)
-                                        }
-                                      >
-                                        {status}: <strong>{list.length}</strong>
-                                      </button>
-                                    )
-                                  )}
-                                </div>
+                          {Object.entries(todayUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-today-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
+                                    onClick={() => openGroupModal("Today", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1077,7 +1154,7 @@ export function UserDashboard() {
               </div>
 
               {/* Tomorrow */}
-              <div className="col-12">
+              <div className="col-12 col-xl-4">
                 <div
                   className="card h-100 border-0 shadow-sm"
                   style={{
@@ -1113,29 +1190,23 @@ export function UserDashboard() {
                           Tomorrow&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(tomorrowUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(
-                                    ([status, list], idxStatus) => (
-                                      <button
-                                        key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
-                                        type="button"
-                                        className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
-                                        onClick={() =>
-                                          openGroupModal("Tomorrow", assignedTo, status, list)
-                                        }
-                                      >
-                                        {status}: <strong>{list.length}</strong>
-                                      </button>
-                                    )
-                                  )}
-                                </div>
+                          {Object.entries(tomorrowUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
+                                    onClick={() => openGroupModal("Tomorrow", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1145,9 +1216,6 @@ export function UserDashboard() {
             </>
           )}
         </div>
-
-        {/* Summary Cards (unchanged in your file) */}
-        {/* ... keep all your summary cards code exactly as you already have ... */}
 
         {/* Modal for rows */}
         {modalOpen && (
@@ -1185,9 +1253,7 @@ export function UserDashboard() {
                     }}
                   >
                     {modalRows.length === 0 ? (
-                      <div className="p-4 text-center text-muted small">
-                        No records available.
-                      </div>
+                      <div className="p-4 text-center text-muted small">No records available.</div>
                     ) : (
                       <div className="table-responsive">
                         <table className="table table-sm table-hover mb-0 align-middle">
@@ -1195,10 +1261,7 @@ export function UserDashboard() {
                             <tr className="small text-muted">
                               <th style={{ width: "14%" }}>Mobile</th>
                               <th style={{ width: "14%" }}>Name</th>
-
-                              {/* ✅ Added Source column */}
                               <th style={{ width: "14%" }}>Source</th>
-
                               <th style={{ width: "16%" }}>Project</th>
                               <th style={{ width: "14%" }}>Status</th>
                               <th style={{ width: "24%" }}>Remarks</th>
@@ -1210,10 +1273,7 @@ export function UserDashboard() {
                           <tbody>
                             {modalRows.map((row, idx) => {
                               const rowKey = row.leadKey || row.id;
-                              const isEditing =
-                                editingRowId &&
-                                editingRowId === rowKey &&
-                                editRowData;
+                              const isEditing = editingRowId && editingRowId === rowKey && editRowData;
 
                               return (
                                 <tr
@@ -1224,20 +1284,15 @@ export function UserDashboard() {
                                       : undefined
                                   }
                                 >
-                                  <td className="fw-semibold text-primary">
-                                    {row.mobile || "—"}
-                                  </td>
+                                  <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
                                   <td>{row.name || "—"}</td>
 
-                                  {/* ✅ Source dropdown in edit mode */}
                                   <td>
                                     {isEditing ? (
                                       <select
                                         className="form-select form-select-sm"
                                         value={editRowData.source || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("source", e.target.value)
-                                        }
+                                        onChange={(e) => handleEditRowChange("source", e.target.value)}
                                       >
                                         <option value="">Select source</option>
                                         {SOURCE_OPTIONS.map((s) => (
@@ -1247,9 +1302,7 @@ export function UserDashboard() {
                                         ))}
                                       </select>
                                     ) : (
-                                      <span className="small text-dark">
-                                        {row.source || "—"}
-                                      </span>
+                                      <span className="small text-dark">{row.source || "—"}</span>
                                     )}
                                   </td>
 
@@ -1259,9 +1312,7 @@ export function UserDashboard() {
                                         type="text"
                                         className="form-control form-control-sm"
                                         value={editRowData.project || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("project", e.target.value)
-                                        }
+                                        onChange={(e) => handleEditRowChange("project", e.target.value)}
                                       />
                                     ) : (
                                       row.project || "—"
@@ -1273,9 +1324,7 @@ export function UserDashboard() {
                                       <select
                                         className="form-select form-select-sm"
                                         value={editRowData.status || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("status", e.target.value)
-                                        }
+                                        onChange={(e) => handleEditRowChange("status", e.target.value)}
                                       >
                                         <option value="">Select status</option>
                                         <option value="Details_shared">Details_shared</option>
@@ -1295,9 +1344,7 @@ export function UserDashboard() {
                                       </select>
                                     ) : (
                                       <div className="d-flex flex-column gap-1">
-                                        <span className="small text-dark">
-                                          {row.status || "—"}
-                                        </span>
+                                        <span className="small text-dark">{row.status || "—"}</span>
                                         {row.verification_call && (
                                           <span
                                             className="badge rounded-pill"
@@ -1321,14 +1368,10 @@ export function UserDashboard() {
                                         rows={2}
                                         className="form-control form-control-sm"
                                         value={editRowData.remarks || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("remarks", e.target.value)
-                                        }
+                                        onChange={(e) => handleEditRowChange("remarks", e.target.value)}
                                       />
                                     ) : (
-                                      <span className="small text-muted">
-                                        {row.remarks || "—"}
-                                      </span>
+                                      <span className="small text-muted">{row.remarks || "—"}</span>
                                     )}
                                   </td>
 
@@ -1338,9 +1381,7 @@ export function UserDashboard() {
                                         type="datetime-local"
                                         className="form-control form-control-sm"
                                         value={editRowData.date || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("date", e.target.value)
-                                        }
+                                        onChange={(e) => handleEditRowChange("date", e.target.value)}
                                         disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
                                       />
                                     ) : (
@@ -1351,9 +1392,7 @@ export function UserDashboard() {
                                   </td>
 
                                   <td>
-                                    <span className="small text-dark">
-                                      {row.Assigned_to || "—"}
-                                    </span>
+                                    <span className="small text-dark">{row.Assigned_to || "—"}</span>
                                   </td>
 
                                   <td>
@@ -1475,7 +1514,7 @@ export function UserDashboard() {
                       />
                     </div>
 
-                    {/* ✅ Source dropdown (replaced input) */}
+                    {/* ✅ Source dropdown */}
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Source</label>
                       <select
@@ -1492,7 +1531,6 @@ export function UserDashboard() {
                       </select>
                     </div>
 
-                    {/* Project field */}
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Project</label>
                       <input
