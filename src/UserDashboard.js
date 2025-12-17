@@ -172,8 +172,7 @@ export function UserDashboard() {
 
       if (role === "user") {
         leads = leads.filter(
-          (l) =>
-            (l.Assigned_to || "").toString().trim().toLowerCase() === username
+          (l) => (l.Assigned_to || "").toString().trim().toLowerCase() === username
         );
 
         const myLeadIds = new Set(leads.map((l) => l.lead_id));
@@ -209,8 +208,7 @@ export function UserDashboard() {
 
       const totalFollowUps = onlyFollowUps.length;
 
-      const totalSiteVisits = leads.filter((l) => l.status === "Site Visited")
-        .length;
+      const totalSiteVisits = leads.filter((l) => l.status === "Site Visited").length;
 
       const totalBooked = leads.filter((l) => l.status === "Booked").length;
 
@@ -240,8 +238,7 @@ export function UserDashboard() {
 
         if (d < startOfToday) overdue.push(fu);
         else if (d >= startOfToday && d < startOfTomorrow) today.push(fu);
-        else if (d >= startOfTomorrow && d < startOfDayAfterTomorrow)
-          tomorrow.push(fu);
+        else if (d >= startOfTomorrow && d < startOfDayAfterTomorrow) tomorrow.push(fu);
       });
 
       const sortByDate = (arr) =>
@@ -820,6 +817,13 @@ export function UserDashboard() {
       `}</style>
 
       <div className="container-xl" style={{ maxWidth: "1500px" }}>
+        {/* ✅ datalist: dropdown suggestions + allow typing custom source */}
+        <datalist id="source-options">
+          {SOURCE_OPTIONS.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+
         {/* HEADER */}
         <div className="row mb-4">
           <div className="col-12">
@@ -1064,7 +1068,13 @@ export function UserDashboard() {
                       </div>
                     ) : (
                       <>
-                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            color: "#6c757d",
+                            marginBottom: "0.4rem",
+                          }}
+                        >
                           Overdue follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
@@ -1125,7 +1135,13 @@ export function UserDashboard() {
                       </div>
                     ) : (
                       <>
-                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            color: "#6c757d",
+                            marginBottom: "0.4rem",
+                          }}
+                        >
                           Today&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
@@ -1186,7 +1202,13 @@ export function UserDashboard() {
                       </div>
                     ) : (
                       <>
-                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            color: "#6c757d",
+                            marginBottom: "0.4rem",
+                          }}
+                        >
                           Tomorrow&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
@@ -1199,7 +1221,9 @@ export function UserDashboard() {
                                     key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
                                     type="button"
                                     className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
-                                    onClick={() => openGroupModal("Tomorrow", assignedTo, status, list)}
+                                    onClick={() =>
+                                      openGroupModal("Tomorrow", assignedTo, status, list)
+                                    }
                                   >
                                     {status}: <strong>{list.length}</strong>
                                   </button>
@@ -1273,14 +1297,18 @@ export function UserDashboard() {
                           <tbody>
                             {modalRows.map((row, idx) => {
                               const rowKey = row.leadKey || row.id;
-                              const isEditing = editingRowId && editingRowId === rowKey && editRowData;
+                              const isEditing =
+                                editingRowId && editingRowId === rowKey && editRowData;
 
                               return (
                                 <tr
                                   key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
                                   style={
                                     row.verification_call
-                                      ? { backgroundColor: "#fff7ed", borderLeft: "4px solid #f97316" }
+                                      ? {
+                                          backgroundColor: "#fff7ed",
+                                          borderLeft: "4px solid #f97316",
+                                        }
                                       : undefined
                                   }
                                 >
@@ -1289,18 +1317,16 @@ export function UserDashboard() {
 
                                   <td>
                                     {isEditing ? (
-                                      <select
-                                        className="form-select form-select-sm"
+                                      <input
+                                        type="text"
+                                        className="form-control form-control-sm"
+                                        list="source-options"
                                         value={editRowData.source || ""}
-                                        onChange={(e) => handleEditRowChange("source", e.target.value)}
-                                      >
-                                        <option value="">Select source</option>
-                                        {SOURCE_OPTIONS.map((s) => (
-                                          <option key={s} value={s}>
-                                            {s}
-                                          </option>
-                                        ))}
-                                      </select>
+                                        onChange={(e) =>
+                                          handleEditRowChange("source", e.target.value)
+                                        }
+                                        placeholder="Select or type source"
+                                      />
                                     ) : (
                                       <span className="small text-dark">{row.source || "—"}</span>
                                     )}
@@ -1312,7 +1338,9 @@ export function UserDashboard() {
                                         type="text"
                                         className="form-control form-control-sm"
                                         value={editRowData.project || ""}
-                                        onChange={(e) => handleEditRowChange("project", e.target.value)}
+                                        onChange={(e) =>
+                                          handleEditRowChange("project", e.target.value)
+                                        }
                                       />
                                     ) : (
                                       row.project || "—"
@@ -1324,7 +1352,9 @@ export function UserDashboard() {
                                       <select
                                         className="form-select form-select-sm"
                                         value={editRowData.status || ""}
-                                        onChange={(e) => handleEditRowChange("status", e.target.value)}
+                                        onChange={(e) =>
+                                          handleEditRowChange("status", e.target.value)
+                                        }
                                       >
                                         <option value="">Select status</option>
                                         <option value="Details_shared">Details_shared</option>
@@ -1368,7 +1398,9 @@ export function UserDashboard() {
                                         rows={2}
                                         className="form-control form-control-sm"
                                         value={editRowData.remarks || ""}
-                                        onChange={(e) => handleEditRowChange("remarks", e.target.value)}
+                                        onChange={(e) =>
+                                          handleEditRowChange("remarks", e.target.value)
+                                        }
                                       />
                                     ) : (
                                       <span className="small text-muted">{row.remarks || "—"}</span>
@@ -1381,7 +1413,9 @@ export function UserDashboard() {
                                         type="datetime-local"
                                         className="form-control form-control-sm"
                                         value={editRowData.date || ""}
-                                        onChange={(e) => handleEditRowChange("date", e.target.value)}
+                                        onChange={(e) =>
+                                          handleEditRowChange("date", e.target.value)
+                                        }
                                         disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
                                       />
                                     ) : (
@@ -1392,7 +1426,9 @@ export function UserDashboard() {
                                   </td>
 
                                   <td>
-                                    <span className="small text-dark">{row.Assigned_to || "—"}</span>
+                                    <span className="small text-dark">
+                                      {row.Assigned_to || "—"}
+                                    </span>
                                   </td>
 
                                   <td>
@@ -1514,21 +1550,17 @@ export function UserDashboard() {
                       />
                     </div>
 
-                    {/* ✅ Source dropdown */}
+                    {/* ✅ Source: dropdown suggestions + allow typing custom */}
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Source</label>
-                      <select
-                        className="form-select form-select-sm"
-                        value={newLead.source}
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        list="source-options"
+                        value={newLead.source || ""}
                         onChange={(e) => handleNewLeadChange("source", e.target.value)}
-                      >
-                        <option value="">Select source</option>
-                        {SOURCE_OPTIONS.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
+                        placeholder="Select or type source"
+                      />
                     </div>
 
                     <div className="col-12 col-sm-6">
@@ -1637,7 +1669,6 @@ export function UserDashboard() {
             </div>
           </div>
         )}
-
       </div>
     </div>
   );
