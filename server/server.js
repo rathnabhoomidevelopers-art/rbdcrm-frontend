@@ -35,14 +35,25 @@ const logRequest = (req, res, next) => {
   next();
 };
 
-app.use(logRequest);
-app.use(
-  cors({
-    origin: "*",
-    methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+// Configure CORS properly
+const corsOptions = {
+  origin: [
+    'https://www.rbdcrm.com',
+    'https://rbdcrm.com',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -81,6 +92,15 @@ function auth(allowedRoles = []) {
     }
   };
 }
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok',
+    message: 'Server is running',
+    timestamp: new Date().toISOString()
+  });
+});
 
 app.post("/auth/admin-login", async (req, res) => {
   const { user_id, password } = req.body || {};
@@ -765,7 +785,7 @@ app.get("/status", auth(["admin", "user"]), (req, res) => {
         .then((document) => res.status(200).json(document))
         .finally(() => clientObj.close());
     })
-    .catch((err) {
+    .catch((err) => {
       console.error("Status fetch error", err);
       return res.status(500).json({ message: "Database connection failed!" });
     });
@@ -886,7 +906,7 @@ app.get("/follow-up/:id", auth(["admin", "user"]), (req, res) => {
         })
         .finally(() => clientObj.close());
     })
-    .catch((err) {
+    .catch((err) => {
       console.error("DB connection error", err);
       return res.status(500).json({ message: "Database connection failed" });
     });
@@ -1047,6 +1067,43 @@ app.get("/", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`server running http://127.0.0.1:${PORT}`);
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ 
+    message: 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    message: 'Route not found',
+    path: req.originalUrl 
+  });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://127.0.0.1:${PORT}`);
+  console.log(`Health check: http://127.0.0.1:${PORT}/health`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+module.exports = app;
