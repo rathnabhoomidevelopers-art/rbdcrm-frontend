@@ -147,7 +147,7 @@ export function UserDashboard() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [editRowData, setEditRowData] = useState(null);
 
-  // ✅ NEW: toggle to show previous remarks (only for the currently edited row)
+  // ✅ Toggle for showing previous remarks (only for the currently edited row)
   const [showPrevRemarks, setShowPrevRemarks] = useState(false);
 
   const role = localStorage.getItem("role");
@@ -717,7 +717,7 @@ export function UserDashboard() {
     }
   };
 
-  // ✅ UPDATED: remarks textbox should start empty; previous remarks shown only on click
+  // ✅ When clicking Edit: clear textarea + keep ALL previous remarks separately
   const startEditRow = (row) => {
     const rowId = row.leadKey || row.id;
     setEditingRowId(rowId);
@@ -728,8 +728,8 @@ export function UserDashboard() {
       leadKey: rowId,
       date: row.date ? toLocalInputValue(row.date) : "",
       source: row.source || "",
-      prevRemarks: row.remarks || "", // ✅ store old remarks separately
-      remarks: "", // ✅ keep textarea empty
+      prevRemarks: row.remarks || "", // ✅ this should contain ALL previous remarks (as stored in DB)
+      remarks: "", // ✅ textarea must start empty
     });
   };
 
@@ -761,12 +761,16 @@ export function UserDashboard() {
     if (!editRowData || !editingRowId) return;
 
     try {
-      const newRemarks = (editRowData.remarks || "").trim();
+      const newRemark = (editRowData.remarks || "").trim();
+
+      // ✅ Append new remark to previous remarks so history is preserved
+      const combinedRemarks = [editRowData.prevRemarks, newRemark]
+        .filter(Boolean)
+        .join("\n");
 
       const payload = {
         status: editRowData.status || null,
-        // ✅ only send new remarks (empty => null)
-        remarks: newRemarks ? newRemarks : null,
+        remarks: combinedRemarks ? combinedRemarks : null,
         project: editRowData.project || null,
         source: editRowData.source || null,
         dob: editRowData.date || null,
@@ -1418,32 +1422,30 @@ export function UserDashboard() {
                                     )}
                                   </td>
 
-                                  {/* ✅ UPDATED REMARKS UX */}
+                                  {/* ✅ Remarks: textarea empty + small "Remarks" button to view previous remarks */}
                                   <td>
                                     {isEditing ? (
                                       <div className="d-flex flex-column gap-1">
-                                        <div className="d-flex align-items-center justify-content-between gap-2">
-                                          {/* textarea starts empty */}
-                                          <textarea
-                                            rows={2}
-                                            className="form-control form-control-sm"
-                                            value={editRowData.remarks || ""}
-                                            onChange={(e) =>
-                                              handleEditRowChange("remarks", e.target.value)
-                                            }
-                                            placeholder="Type new remark..."
-                                          />
+                                        <textarea
+                                          rows={2}
+                                          className="form-control form-control-sm"
+                                          value={editRowData.remarks || ""}
+                                          onChange={(e) =>
+                                            handleEditRowChange("remarks", e.target.value)
+                                          }
+                                          placeholder="Type new remark..."
+                                        />
 
-                                          {/* small button/icon to show previous remarks */}
+                                        <div className="d-flex justify-content-end">
                                           <button
                                             type="button"
                                             className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
-                                            style={{ whiteSpace: "nowrap" }}
                                             onClick={() => setShowPrevRemarks((v) => !v)}
                                             disabled={!editRowData?.prevRemarks}
                                             title="Show previous remarks"
                                           >
                                             <MessageSquareText size={14} />
+                                            <span>Remarks</span>
                                             {showPrevRemarks ? (
                                               <ChevronUp size={14} />
                                             ) : (
@@ -1452,7 +1454,7 @@ export function UserDashboard() {
                                           </button>
                                         </div>
 
-                                        {showPrevRemarks && !!editRowData?.prevRemarks && (
+                                        {showPrevRemarks && (
                                           <div
                                             className="small text-muted"
                                             style={{
@@ -1466,7 +1468,11 @@ export function UserDashboard() {
                                             <div className="fw-semibold text-dark mb-1">
                                               Previous remarks
                                             </div>
-                                            {editRowData.prevRemarks}
+                                            {editRowData?.prevRemarks ? (
+                                              editRowData.prevRemarks
+                                            ) : (
+                                              <span className="text-muted">No previous remarks</span>
+                                            )}
                                           </div>
                                         )}
                                       </div>
@@ -1560,7 +1566,7 @@ export function UserDashboard() {
           </>
         )}
 
-        {/* Add Lead Modal (unchanged) */}
+        {/* Add Lead Modal */}
         {showAddModal && (
           <div className="fixed inset-0 z-50 d-flex align-items-center justify-content-center bg-black bg-opacity-25">
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>
