@@ -466,6 +466,179 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
+// ✅ BULK ADD LEADS (FAST)
+app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
+  const items = Array.isArray(req.body?.leads) ? req.body.leads : [];
+
+  if (!items.length) {
+    return res.status(400).json({ message: "No leads provided. Send { leads: [...] }" });
+  }
+
+  // helper: normalize/validate mobile to 10 digits
+  const normalizeMobile = (raw) => {
+    if (raw === undefined || raw === null) return { ok: false, digits: "", error: "Mobile missing" };
+
+    let digits = raw.toString().replace(/\D/g, "");
+    if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+    if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+
+    if (digits.length !== 10) {
+      return { ok: false, digits, error: "Mobile must be 10 digits" };
+    }
+    if (!/^[6-9]\d{9}$/.test(digits)) {
+      return { ok: false, digits, error: "Mobile must start with 6-9" };
+    }
+    return { ok: true, digits, error: null };
+  };
+
+  // assign-to rule (same as /add-lead)
+  const currentUser = (req.user?.user_name || "").toString().trim().toLowerCase();
+  const isUser = req.user?.role === "user";
+
+  let clientObj;
+  try {
+    clientObj = await mongoClient.connect(connectionString);
+    const database = clientObj.db("crm");
+    const leadsCol = database.collection("leads");
+    const followUpsCol = database.collection("follow-ups");
+
+    // 1) Validate + normalize + dedupe inside uploaded file
+    const seenInFile = new Set();
+    const valid = [];
+    const invalid = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const row = items[i] || {};
+      const nm = normalizeMobile(row.mobile);
+
+      if (!nm.ok) {
+        invalid.push({ row: i + 1, mobile: row.mobile, reason: nm.error });
+        continue;
+      }
+
+      if (seenInFile.has(nm.digits)) {
+        invalid.push({ row: i + 1, mobile: nm.digits, reason: "Duplicate mobile in uploaded file" });
+        continue;
+      }
+      seenInFile.add(nm.digits);
+
+      // normalize Assigned_to
+      let assignedTo = row.Assigned_to
+        ? row.Assigned_to.toString().trim().toLowerCase()
+        : null;
+
+      if (!assignedTo && isUser && currentUser) assignedTo = currentUser;
+
+      // Busy default dob = tomorrow 9AM (same as /add-lead)
+      let dob = row.dob ? new Date(row.dob) : null;
+      if (row.status === "Busy" && (!dob || Number.isNaN(dob.getTime()))) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(9, 0, 0, 0);
+        dob = tomorrow;
+      }
+
+      // if dob invalid -> null
+      if (dob && Number.isNaN(dob.getTime())) dob = null;
+
+      valid.push({
+        lead_id: new ObjectId().toHexString(),
+        name: row.name || null,
+        mobile: nm.digits,
+        source: row.source || null,
+        status: row.status || null,
+        job_role: row.job_role || null,
+        budget: row.budget || null,
+        project: row.project || null,
+        remarks: row.remarks || null,
+        dob: dob,
+        Assigned_to: assignedTo,
+        createdAt: new Date(),
+        verification_call: false,
+        original_assigned: null,
+        transfer_date: null,
+      });
+    }
+
+    if (!valid.length) {
+      return res.status(400).json({
+        message: "No valid leads to insert",
+        inserted: 0,
+        skippedExisting: 0,
+        invalidCount: invalid.length,
+        invalid,
+      });
+    }
+
+    // 2) Find existing mobiles in DB (single query)
+    const mobiles = valid.map((v) => v.mobile);
+    const existingDocs = await leadsCol
+      .find({ mobile: { $in: mobiles } }, { projection: { mobile: 1 } })
+      .toArray();
+    const existingSet = new Set(existingDocs.map((d) => (d.mobile || "").toString()));
+
+    // 3) Filter out already-existing leads
+    const toInsert = [];
+    const skippedExisting = [];
+
+    for (const v of valid) {
+      if (existingSet.has(v.mobile)) skippedExisting.push(v.mobile);
+      else toInsert.push(v);
+    }
+
+    if (!toInsert.length) {
+      return res.status(200).json({
+        message: "All uploaded leads already exist",
+        inserted: 0,
+        skippedExisting: skippedExisting.length,
+        invalidCount: invalid.length,
+        invalid,
+      });
+    }
+
+    // 4) Insert all leads in one DB call (FAST)
+    // ordered:false -> continue inserting even if one fails
+    const insertRes = await leadsCol.insertMany(toInsert, { ordered: false });
+
+    // 5) Create follow-ups in bulk (only tracked statuses)
+    const followUps = toInsert
+      .filter((l) => l.status && TRACKED_STATUSES.includes(l.status))
+      .map((l) => ({
+        followup_id: l.lead_id,
+        date: l.dob || new Date(),
+        name: l.name || null,
+        mobile: l.mobile ? parseInt(l.mobile, 10) : null,
+        source: l.source || null,
+        status: l.status || null,
+        job_role: l.job_role || null,
+        budget: l.budget || null,
+        project: l.project || null,
+        remarks: l.remarks || null,
+        createdAt: new Date(),
+      }));
+
+    if (followUps.length) {
+      await followUpsCol.insertMany(followUps, { ordered: false });
+    }
+
+    return res.status(201).json({
+      message: "Bulk upload completed",
+      received: items.length,
+      valid: valid.length,
+      inserted: Object.keys(insertRes.insertedIds || {}).length,
+      skippedExisting: skippedExisting.length,
+      invalidCount: invalid.length,
+      invalid, // keep this so UI can show “row no + reason”
+    });
+  } catch (err) {
+    console.error("Bulk add error:", err);
+    return res.status(500).json({ message: "Bulk upload failed" });
+  } finally {
+    if (clientObj) await clientObj.close();
+  }
+});
+
+
 /**
  * ✅ /edit-lead
  * - true partial update
