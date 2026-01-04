@@ -44,9 +44,7 @@ const PROJECT_OPTIONS = [
 ];
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
-
-// Change: RNR should NOT lock date in edit (and even in add, your request is mainly edit)
-// We'll lock only NR/SF and Busy.
+// Lock only NR/SF and Busy for date edits
 const HARD_LOCK_STATUSES = ["NR/SF", "Busy"];
 
 const DASHBOARD_FOLLOWUP_STATUSES = [
@@ -165,6 +163,10 @@ export function UserDashboard() {
     updatedToday: 0,
   });
 
+  // ✅ NEW: Admin breakdown (leads added today grouped by createdBy)
+  const [adminBreakdown, setAdminBreakdown] = useState({
+    addedTodayByUser: {},
+  });
 
   const [followUpAlerts, setFollowUpAlerts] = useState({
     overdue: [],
@@ -203,7 +205,7 @@ export function UserDashboard() {
   // ✅ Toggle for showing previous remarks (only for the currently edited row)
   const [showPrevRemarks, setShowPrevRemarks] = useState(false);
 
-  // ✅ NEW: Global search input (header) + modal filter input
+  // ✅ Global search input (header) + modal filter input
   const [globalMobileSearch, setGlobalMobileSearch] = useState("");
   const [modalMobileSearch, setModalMobileSearch] = useState("");
 
@@ -218,6 +220,31 @@ export function UserDashboard() {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "";
     return d.toLocaleString();
+  };
+
+  // ✅ Build rows for "Added Today (By User)" modal (admin only)
+  const buildAddedTodayByUserRows = (mapObj) => {
+    const entries = Object.entries(mapObj || {});
+    // Sort desc by count
+    entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
+    return entries.map(([u, count]) => ({
+      id: `added-${u}`,
+      user: u,
+      count,
+    }));
+  };
+
+  const openAddedTodayByUserModal = () => {
+    if (role !== "admin") return;
+    setModalContext({ kind: "adminAddedTodayByUser" });
+    setModalTitle("Leads Added Today (By User)");
+    setModalRows(buildAddedTodayByUserRows(adminBreakdown.addedTodayByUser));
+    setModalOpen(true);
+
+    setEditingRowId(null);
+    setEditRowData(null);
+    setShowPrevRemarks(false);
+    setModalMobileSearch("");
   };
 
   const fetchStats = async ({ showFullScreenLoader = false } = {}) => {
@@ -274,34 +301,71 @@ export function UserDashboard() {
       const totalBooked = leads.filter((l) => l.status === "Booked").length;
 
       const now = new Date();
-      const startOfToday = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        0,
-        0,
-        0,
-        0
-      );
-      // NEW: today range
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
       const endOfToday = new Date(startOfToday);
       endOfToday.setDate(endOfToday.getDate() + 1);
 
-      // NEW: helper
       const isToday = (d) => {
         const dt = d ? new Date(d) : null;
         if (!dt || Number.isNaN(dt.getTime())) return false;
         return dt >= startOfToday && dt < endOfToday;
       };
 
-      // NEW: counts
+      // ✅ Added Today (for the logged-in user)
       const addedToday = leads.filter(
-        (l) => isToday(l.createdAt) && (l.createdBy || "").toString().trim().toLowerCase() === username
+        (l) =>
+          isToday(l.createdAt) &&
+          (l.createdBy || "").toString().trim().toLowerCase() === username
       ).length;
 
-      const updatedToday = leads.filter(
-        (l) => isToday(l.updatedAt) && (l.updatedBy || "").toString().trim().toLowerCase() === username
-      ).length;
+      // ✅ Updated Today: exclude newly created leads + count only meaningful updates
+      const updatedToday = leads.filter((l) => {
+        if (!isToday(l.updatedAt)) return false;
+
+        const ub = (l.updatedBy || "").toString().trim().toLowerCase();
+        if (ub !== username) return false;
+
+        const created = l.createdAt ? new Date(l.createdAt) : null;
+        const updated = l.updatedAt ? new Date(l.updatedAt) : null;
+        if (!created || !updated || Number.isNaN(created.getTime()) || Number.isNaN(updated.getTime()))
+          return false;
+
+        // Exclude new leads (created today and updated in same minute)
+        const isNewSameMinute =
+          isToday(created) &&
+          created.getFullYear() === updated.getFullYear() &&
+          created.getMonth() === updated.getMonth() &&
+          created.getDate() === updated.getDate() &&
+          created.getHours() === updated.getHours() &&
+          created.getMinutes() === updated.getMinutes();
+
+        if (isNewSameMinute) return false;
+
+        // Meaningful update rule: must have at least one meaningful field
+        const hasMeaningfulData =
+          (l.remarks && String(l.remarks).trim().length > 0) ||
+          (l.status && String(l.status).trim().length > 0) ||
+          (l.project && String(l.project).trim().length > 0) ||
+          (l.source && String(l.source).trim().length > 0) ||
+          (l.dob && String(l.dob).trim().length > 0);
+
+        if (!hasMeaningfulData) return false;
+
+        return true;
+      }).length;
+
+      // ✅ Admin breakdown: Leads added today grouped by createdBy
+      if (role === "admin") {
+        const leadsAddedToday = leads.filter((l) => isToday(l.createdAt));
+        const addedTodayByUser = leadsAddedToday.reduce((acc, l) => {
+          const u = (l.createdBy || "unknown").toString().trim().toLowerCase();
+          acc[u] = (acc[u] || 0) + 1;
+          return acc;
+        }, {});
+        setAdminBreakdown({ addedTodayByUser });
+      } else {
+        setAdminBreakdown({ addedTodayByUser: {} });
+      }
 
       const startOfTomorrow = new Date(startOfToday);
       startOfTomorrow.setDate(startOfToday.getDate() + 1);
@@ -322,20 +386,16 @@ export function UserDashboard() {
         else if (d >= startOfTomorrow && d < startOfDayAfterTomorrow) tomorrow.push(fu);
       });
 
-      const sortByDate = (arr) =>
-        arr.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+      const sortByDate = (arr) => arr.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
 
       setStats({
         totalLeads,
         totalFollowUps,
         totalSiteVisits,
         totalBooked,
-
-        // ✅ NEW
         addedToday,
         updatedToday,
       });
-
 
       setFollowUpAlerts({
         overdue: sortByDate(overdue),
@@ -442,6 +502,12 @@ export function UserDashboard() {
         Assigned_to: l.Assigned_to || "",
         project: l.project || fu?.project || "",
         verification_call: !!l.verification_call,
+
+        // ✅ admin fields
+        createdBy: l.createdBy || "",
+        updatedBy: l.updatedBy || "",
+        createdAt: l.createdAt || null,
+        updatedAt: l.updatedAt || null,
       });
     });
 
@@ -462,6 +528,12 @@ export function UserDashboard() {
         Assigned_to: fu.Assigned_to || "",
         project: fu.project || "",
         verification_call: false,
+
+        // ✅ admin fields not available in FU fallback
+        createdBy: "",
+        updatedBy: "",
+        createdAt: null,
+        updatedAt: null,
       });
     });
 
@@ -492,7 +564,14 @@ export function UserDashboard() {
   const rebuildModalFromContext = () => {
     if (!modalOpen || !modalContext) return;
 
-    // ✅ NEW: rebuild mobile search modal after refresh
+    if (modalContext.kind === "adminAddedTodayByUser") {
+      setModalTitle("Leads Added Today (By User)");
+      setModalRows(buildAddedTodayByUserRows(adminBreakdown.addedTodayByUser));
+      setModalMobileSearch("");
+      return;
+    }
+
+    // ✅ rebuild mobile search modal after refresh
     if (modalContext.kind === "mobileSearch") {
       const q = modalContext.query || "";
       setModalTitle(`Mobile Search: ${q}`);
@@ -519,6 +598,12 @@ export function UserDashboard() {
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
             verification_call: !!l.verification_call,
+
+            // ✅ admin fields
+            createdBy: l.createdBy || "",
+            updatedBy: l.updatedBy || "",
+            createdAt: l.createdAt || null,
+            updatedAt: l.updatedAt || null,
           }))
         );
         return;
@@ -531,10 +616,7 @@ export function UserDashboard() {
             const key = fu.followup_id || fu.lead_id || fu._id;
             const lead = leadIndex[key];
             const leadKey =
-              (lead && (lead.lead_id || lead._id)) ||
-              fu.lead_id ||
-              fu.followup_id ||
-              fu._id;
+              (lead && (lead.lead_id || lead._id)) || fu.lead_id || fu.followup_id || fu._id;
 
             return {
               id: fu.followup_id || fu._id,
@@ -548,6 +630,12 @@ export function UserDashboard() {
               Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
               project: fu.project || (lead && lead.project) || "",
               verification_call: !!(lead && lead.verification_call),
+
+              // ✅ admin fields (from lead if available)
+              createdBy: (lead && lead.createdBy) || "",
+              updatedBy: (lead && lead.updatedBy) || "",
+              createdAt: (lead && lead.createdAt) || null,
+              updatedAt: (lead && lead.updatedAt) || null,
             };
           })
         );
@@ -570,6 +658,12 @@ export function UserDashboard() {
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
             verification_call: !!l.verification_call,
+
+            // ✅ admin fields
+            createdBy: l.createdBy || "",
+            updatedBy: l.updatedBy || "",
+            createdAt: l.createdAt || null,
+            updatedAt: l.updatedAt || null,
           }))
         );
         return;
@@ -591,6 +685,12 @@ export function UserDashboard() {
             Assigned_to: l.Assigned_to || "",
             project: l.project || "",
             verification_call: !!l.verification_call,
+
+            // ✅ admin fields
+            createdBy: l.createdBy || "",
+            updatedBy: l.updatedBy || "",
+            createdAt: l.createdAt || null,
+            updatedAt: l.updatedAt || null,
           }))
         );
         return;
@@ -610,10 +710,7 @@ export function UserDashboard() {
       const groups = buildUserStatusGroups(bucketArr);
       const list = (groups?.[assignedTo]?.[status] || []).map(({ fu, lead }) => {
         const leadKey =
-          (lead && (lead.lead_id || lead._id)) ||
-          fu.lead_id ||
-          fu.followup_id ||
-          fu._id;
+          (lead && (lead.lead_id || lead._id)) || fu.lead_id || fu.followup_id || fu._id;
 
         return {
           id: fu.followup_id || fu._id,
@@ -627,6 +724,12 @@ export function UserDashboard() {
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
           verification_call: !!(lead && lead.verification_call),
+
+          // ✅ admin fields (from lead if available)
+          createdBy: (lead && lead.createdBy) || "",
+          updatedBy: (lead && lead.updatedBy) || "",
+          createdAt: (lead && lead.createdAt) || null,
+          updatedAt: (lead && lead.updatedAt) || null,
         };
       });
 
@@ -647,6 +750,7 @@ export function UserDashboard() {
     followUpAlerts.overdue,
     followUpAlerts.today,
     followUpAlerts.tomorrow,
+    adminBreakdown.addedTodayByUser,
   ]);
 
   const openModal = (type) => {
@@ -669,6 +773,12 @@ export function UserDashboard() {
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
         verification_call: !!l.verification_call,
+
+        // ✅ admin fields
+        createdBy: l.createdBy || "",
+        updatedBy: l.updatedBy || "",
+        createdAt: l.createdAt || null,
+        updatedAt: l.updatedAt || null,
       }));
     } else if (type === "followups") {
       title = "Follow-Up Leads";
@@ -676,10 +786,7 @@ export function UserDashboard() {
         const key = fu.followup_id || fu.lead_id || fu._id;
         const lead = leadIndex[key];
         const leadKey =
-          (lead && (lead.lead_id || lead._id)) ||
-          fu.lead_id ||
-          fu.followup_id ||
-          fu._id;
+          (lead && (lead.lead_id || lead._id)) || fu.lead_id || fu.followup_id || fu._id;
 
         return {
           id: fu.followup_id || fu._id,
@@ -693,6 +800,12 @@ export function UserDashboard() {
           Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
           project: fu.project || (lead && lead.project) || "",
           verification_call: !!(lead && lead.verification_call),
+
+          // ✅ admin fields (from lead if available)
+          createdBy: (lead && lead.createdBy) || "",
+          updatedBy: (lead && lead.updatedBy) || "",
+          createdAt: (lead && lead.createdAt) || null,
+          updatedAt: (lead && lead.updatedAt) || null,
         };
       });
     } else if (type === "sitevisits") {
@@ -710,6 +823,12 @@ export function UserDashboard() {
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
         verification_call: !!l.verification_call,
+
+        // ✅ admin fields
+        createdBy: l.createdBy || "",
+        updatedBy: l.updatedBy || "",
+        createdAt: l.createdAt || null,
+        updatedAt: l.updatedAt || null,
       }));
     } else if (type === "booked") {
       title = "Booked Leads";
@@ -726,6 +845,12 @@ export function UserDashboard() {
         Assigned_to: l.Assigned_to || "",
         project: l.project || "",
         verification_call: !!l.verification_call,
+
+        // ✅ admin fields
+        createdBy: l.createdBy || "",
+        updatedBy: l.updatedBy || "",
+        createdAt: l.createdAt || null,
+        updatedAt: l.updatedAt || null,
       }));
     }
 
@@ -744,10 +869,7 @@ export function UserDashboard() {
     const title = `${bucketLabel} – ${assignedTo} – ${status}`;
     const rows = (items || []).map(({ fu, lead }) => {
       const leadKey =
-        (lead && (lead.lead_id || lead._id)) ||
-        fu.lead_id ||
-        fu.followup_id ||
-        fu._id;
+        (lead && (lead.lead_id || lead._id)) || fu.lead_id || fu.followup_id || fu._id;
 
       return {
         id: fu.followup_id || fu._id,
@@ -761,6 +883,12 @@ export function UserDashboard() {
         Assigned_to: (lead && lead.Assigned_to) || fu.Assigned_to || "",
         project: fu.project || (lead && lead.project) || "",
         verification_call: !!(lead && lead.verification_call),
+
+        // ✅ admin fields (from lead if available)
+        createdBy: (lead && lead.createdBy) || "",
+        updatedBy: (lead && lead.updatedBy) || "",
+        createdAt: (lead && lead.createdAt) || null,
+        updatedAt: (lead && lead.updatedAt) || null,
       };
     });
 
@@ -823,8 +951,6 @@ export function UserDashboard() {
         }
       } else if (field === "dob") {
         if (HARD_LOCK_STATUSES.includes(prev.status)) return prev;
-
-        // ✅ Ensure time = 09:00 if user selected only date / time not selected
         updated.dob = ensureTime0900(value || "");
       } else {
         updated[field] = value;
@@ -849,9 +975,7 @@ export function UserDashboard() {
       (l) => (l.mobile || "").toString().trim() === trimmedMobile
     );
     if (existingLocal) {
-      toast.error(
-        `This mobile already exists for lead ${existingLocal.name || existingLocal.lead_id}`
-      );
+      toast.error(`This mobile already exists for lead ${existingLocal.name || existingLocal.lead_id}`);
       return;
     }
 
@@ -859,7 +983,6 @@ export function UserDashboard() {
       let statusToSave = newLead.status || "";
       let dobToSave = newLead.dob || "";
 
-      // ✅ Ensure 09:00 if date-only / time not selected
       dobToSave = ensureTime0900(dobToSave);
 
       if (statusToSave === "Visit Scheduled" && (!dobToSave || dobToSave === "")) {
@@ -909,8 +1032,8 @@ export function UserDashboard() {
       leadKey: rowId,
       date: row.date ? toLocalInputValue(row.date) : "",
       source: row.source || "",
-      prevRemarks: row.remarks || "", // this should contain ALL previous remarks (as stored in DB)
-      remarks: "", // textarea must start empty
+      prevRemarks: row.remarks || "", // ALL previous remarks (as stored in DB)
+      remarks: "", // textarea starts empty
     });
   };
 
@@ -925,18 +1048,15 @@ export function UserDashboard() {
       const next = { ...prev, [field]: value };
 
       if (field === "status") {
-        // ✅ if date empty and status requires auto +24h, set it
         if (AUTO_24H_STATUSES.includes(value) && (!prev.date || prev.date === "")) {
           next.date = getNowPlus24Hours();
         }
       }
 
       if (field === "date") {
-        // ✅ Ensure time = 09:00 if only date / time not selected
         const fixed = ensureTime0900(value);
         next.date = fixed;
 
-        // ✅ Change: RNR must be editable (date should not be blocked)
         if (HARD_LOCK_STATUSES.includes(prev.status)) return prev;
       }
 
@@ -950,12 +1070,8 @@ export function UserDashboard() {
     try {
       const newRemark = (editRowData.remarks || "").trim();
 
-      // Append new remark to previous remarks so history is preserved
-      const combinedRemarks = [editRowData.prevRemarks, newRemark]
-        .filter(Boolean)
-        .join("\n");
+      const combinedRemarks = [editRowData.prevRemarks, newRemark].filter(Boolean).join("\n");
 
-      // ✅ Ensure time = 09:00 if date-only / time not selected (edit save)
       const finalDob = ensureTime0900(editRowData.date || "");
 
       const payload = {
@@ -972,10 +1088,10 @@ export function UserDashboard() {
       toast.success("Lead updated successfully");
 
       if (res?.data?.transferredTo) {
-        toast.success(
-          `Lead transferred to ${res.data.transferredTo} (Verification Call)`,
-          { duration: 3500, position: "top-right" }
-        );
+        toast.success(`Lead transferred to ${res.data.transferredTo} (Verification Call)`, {
+          duration: 3500,
+          position: "top-right",
+        });
       }
 
       cancelEditRow();
@@ -998,8 +1114,7 @@ export function UserDashboard() {
         className="d-flex align-items-center justify-content-center"
         style={{
           minHeight: "100vh",
-          background:
-            "radial-gradient(circle at top, #e0f2ff 0, #f3f4f6 45%, #eef1f4 100%)",
+          background: "radial-gradient(circle at top, #e0f2ff 0, #f3f4f6 45%, #eef1f4 100%)",
         }}
       >
         <div className="text-center">
@@ -1012,13 +1127,14 @@ export function UserDashboard() {
     );
   }
 
+  const isAdminAddedByUserModal = modalContext?.kind === "adminAddedTodayByUser";
+
   return (
     <div
       className="py-4"
       style={{
         minHeight: "100vh",
-        background:
-          "radial-gradient(circle at top, #e0f2ff 0, #f3f4f6 45%, #eef1f4 100%)",
+        background: "radial-gradient(circle at top, #e0f2ff 0, #f3f4f6 45%, #eef1f4 100%)",
       }}
     >
       <style>{`
@@ -1068,13 +1184,10 @@ export function UserDashboard() {
                       </span>
                       <div>
                         <h2 className="fw-semibold mb-1" style={{ fontSize: "2rem" }}>
-                          {role === "admin"
-                            ? "Admin Follow-up Dashboard"
-                            : "User Performance Dashboard"}
+                          {role === "admin" ? "Admin Follow-up Dashboard" : "User Performance Dashboard"}
                         </h2>
                         <div style={{ opacity: 0.9, maxWidth: 520, fontSize: "1rem" }}>
-                          Stay on top of your{" "}
-                          <strong>leads, follow-ups, site visits</strong> and{" "}
+                          Stay on top of your <strong>leads, follow-ups, site visits</strong> and{" "}
                           <strong>bookings</strong> at a glance.
                         </div>
                       </div>
@@ -1102,9 +1215,7 @@ export function UserDashboard() {
                       <button
                         type="button"
                         className="btn btn-outline-light btn-sm"
-                        onClick={() => {
-                          setGlobalMobileSearch("");
-                        }}
+                        onClick={() => setGlobalMobileSearch("")}
                       >
                         Clear
                       </button>
@@ -1244,7 +1355,7 @@ export function UserDashboard() {
             </div>
           </div>
 
-          {/* ✅ Added Today */}
+          {/* Added Today */}
           <div className="col-12 col-md-6 col-xl-3">
             <div className="card border-0 shadow-sm h-100" style={{ borderRadius: "1.1rem" }}>
               <div className="card-body d-flex align-items-center gap-3">
@@ -1264,7 +1375,7 @@ export function UserDashboard() {
             </div>
           </div>
 
-          {/* ✅ Updated Today */}
+          {/* Updated Today */}
           <div className="col-12 col-md-6 col-xl-3">
             <div className="card border-0 shadow-sm h-100" style={{ borderRadius: "1.1rem" }}>
               <div className="card-body d-flex align-items-center gap-3">
@@ -1283,8 +1394,34 @@ export function UserDashboard() {
               </div>
             </div>
           </div>
-        </div>
 
+          {/* ✅ Admin only: Added Today (By User) */}
+          {role === "admin" && (
+            <div className="col-12 col-md-6 col-xl-3">
+              <div
+                className="card border-0 shadow-sm h-100"
+                style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+                onClick={openAddedTodayByUserModal}
+                title="View breakdown of leads added today by each user"
+              >
+                <div className="card-body d-flex align-items-center gap-3">
+                  <div
+                    className="rounded-circle d-flex align-items-center justify-content-center"
+                    style={{ width: 46, height: 46, backgroundColor: "#dbeafe" }}
+                  >
+                    <Users size={20} />
+                  </div>
+                  <div>
+                    <div className="small text-muted">Added Today (By User)</div>
+                    <div className="fw-bold" style={{ fontSize: "1.05rem" }}>
+                      View Breakdown →
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* FOLLOW-UP ALERTS SECTION */}
         <div className="row g-3 mb-4">
@@ -1347,42 +1484,30 @@ export function UserDashboard() {
                     </div>
 
                     {followUpAlerts.overdue.length === 0 ? (
-                      <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>
-                        No overdue follow-ups.
-                      </div>
+                      <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>No overdue follow-ups.</div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Overdue follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(overdueUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                    <button
-                                      key={`${assignedTo}-${status}-${idxStatus}`}
-                                      type="button"
-                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
-                                      onClick={() =>
-                                        openGroupModal("Overdue", assignedTo, status, list)
-                                      }
-                                    >
-                                      {status}: <strong>{list.length}</strong>
-                                    </button>
-                                  ))}
-                                </div>
+                          {Object.entries(overdueUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-danger"
+                                    onClick={() => openGroupModal("Overdue", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1423,37 +1548,27 @@ export function UserDashboard() {
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Today&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(todayUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                    <button
-                                      key={`${assignedTo}-today-${status}-${idxStatus}`}
-                                      type="button"
-                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
-                                      onClick={() =>
-                                        openGroupModal("Today", assignedTo, status, list)
-                                      }
-                                    >
-                                      {status}: <strong>{list.length}</strong>
-                                    </button>
-                                  ))}
-                                </div>
+                          {Object.entries(todayUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-today-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-today-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-warning"
+                                    onClick={() => openGroupModal("Today", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1494,37 +1609,27 @@ export function UserDashboard() {
                       </div>
                     ) : (
                       <>
-                        <div
-                          style={{
-                            fontSize: "0.95rem",
-                            color: "#6c757d",
-                            marginBottom: "0.4rem",
-                          }}
-                        >
+                        <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
                           Tomorrow&apos;s follow-ups by user &amp; status:
                         </div>
                         <div style={{ fontSize: "0.9rem", maxHeight: 140, overflowY: "auto" }}>
-                          {Object.entries(tomorrowUserGroups).map(
-                            ([assignedTo, statusMap], idxUser) => (
-                              <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
-                                <div className="fw-semibold">{assignedTo}</div>
-                                <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
-                                  {Object.entries(statusMap).map(([status, list], idxStatus) => (
-                                    <button
-                                      key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
-                                      type="button"
-                                      className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
-                                      onClick={() =>
-                                        openGroupModal("Tomorrow", assignedTo, status, list)
-                                      }
-                                    >
-                                      {status}: <strong>{list.length}</strong>
-                                    </button>
-                                  ))}
-                                </div>
+                          {Object.entries(tomorrowUserGroups).map(([assignedTo, statusMap], idxUser) => (
+                            <div key={`${assignedTo}-tomorrow-${idxUser}`} className="mb-2">
+                              <div className="fw-semibold">{assignedTo}</div>
+                              <div className="ms-2 d-flex flex-wrap gap-2 mt-1">
+                                {Object.entries(statusMap).map(([status, list], idxStatus) => (
+                                  <button
+                                    key={`${assignedTo}-tomorrow-${status}-${idxStatus}`}
+                                    type="button"
+                                    className="btn btn-sm rounded-pill px-2 py-1 btn-outline-info"
+                                    onClick={() => openGroupModal("Tomorrow", assignedTo, status, list)}
+                                  >
+                                    {status}: <strong>{list.length}</strong>
+                                  </button>
+                                ))}
                               </div>
-                            )
-                          )}
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
@@ -1570,279 +1675,304 @@ export function UserDashboard() {
                       padding: "0.75rem",
                     }}
                   >
-                    {/* mobile filter inside modal */}
-                    <div className="d-flex gap-2 align-items-center mb-2">
-                      <input
-                        className="form-control form-control-sm"
-                        placeholder="Filter mobile inside results..."
-                        value={modalMobileSearch}
-                        onChange={(e) => setModalMobileSearch(e.target.value)}
-                      />
-                      <button
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => setModalMobileSearch("")}
-                      >
-                        Clear
-                      </button>
-                    </div>
+                    {/* mobile filter inside modal (hide for admin breakdown modal) */}
+                    {!isAdminAddedByUserModal && (
+                      <div className="d-flex gap-2 align-items-center mb-2">
+                        <input
+                          className="form-control form-control-sm"
+                          placeholder="Filter mobile inside results..."
+                          value={modalMobileSearch}
+                          onChange={(e) => setModalMobileSearch(e.target.value)}
+                        />
+                        <button
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setModalMobileSearch("")}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
 
                     {modalRows.length === 0 ? (
                       <div className="p-4 text-center text-muted small">No records available.</div>
                     ) : (
                       <div className="table-responsive">
-                        <table className="table table-sm table-hover mb-0 align-middle">
-                          <thead className="table-light">
-                            <tr className="small text-muted">
-                              <th style={{ width: "14%" }}>Mobile</th>
-                              <th style={{ width: "14%" }}>Name</th>
-                              <th style={{ width: "14%" }}>Source</th>
-                              <th style={{ width: "16%" }}>Project</th>
-                              <th style={{ width: "14%" }}>Status</th>
-                              <th style={{ width: "24%" }}>Remarks</th>
-                              <th style={{ width: "18%" }}>Date &amp; Time</th>
-                              <th style={{ width: "18%" }}>Assigned to</th>
-                              <th style={{ width: "12%" }}>Actions</th>
-                            </tr>
-                          </thead>
+                        {/* ✅ Admin Added Today by User modal table */}
+                        {isAdminAddedByUserModal ? (
+                          <table className="table table-sm table-hover mb-0 align-middle">
+                            <thead className="table-light">
+                              <tr className="small text-muted">
+                                <th style={{ width: "70%" }}>User</th>
+                                <th style={{ width: "30%" }}>Leads Added Today</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {modalRows.map((r) => (
+                                <tr key={r.id}>
+                                  <td className="fw-semibold text-dark">{r.user}</td>
+                                  <td className="fw-bold text-primary">{r.count}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <table className="table table-sm table-hover mb-0 align-middle">
+                            <thead className="table-light">
+                              <tr className="small text-muted">
+                                <th style={{ width: "14%" }}>Mobile</th>
+                                <th style={{ width: "14%" }}>Name</th>
+                                <th style={{ width: "14%" }}>Source</th>
+                                <th style={{ width: "16%" }}>Project</th>
+                                <th style={{ width: "14%" }}>Status</th>
+                                <th style={{ width: "24%" }}>Remarks</th>
+                                <th style={{ width: "18%" }}>Date &amp; Time</th>
+                                <th style={{ width: "18%" }}>Assigned to</th>
 
-                          <tbody>
-                            {modalRows
-                              .filter((r) => mobileMatches(r.mobile, modalMobileSearch))
-                              .map((row, idx) => {
-                                const rowKey = row.leadKey || row.id;
-                                const isEditing =
-                                  editingRowId && editingRowId === rowKey && editRowData;
+                                {/* ✅ Admin columns */}
+                                {role === "admin" && <th style={{ width: "14%" }}>Created By</th>}
+                                {role === "admin" && <th style={{ width: "14%" }}>Updated By</th>}
 
-                                return (
-                                  <tr
-                                    key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
-                                    style={
-                                      row.verification_call
-                                        ? {
-                                            backgroundColor: "#fff7ed",
-                                            borderLeft: "4px solid #f97316",
-                                          }
-                                        : undefined
-                                    }
-                                  >
-                                    <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
-                                    <td>{row.name || "—"}</td>
+                                <th style={{ width: "12%" }}>Actions</th>
+                              </tr>
+                            </thead>
 
-                                    <td>
-                                      {isEditing ? (
-                                        <input
-                                          type="text"
-                                          className="form-control form-control-sm"
-                                          list="source-options"
-                                          value={editRowData.source || ""}
-                                          onChange={(e) =>
-                                            handleEditRowChange("source", e.target.value)
-                                          }
-                                          placeholder="Select or type source"
-                                        />
-                                      ) : (
-                                        <span className="small text-dark">{row.source || "—"}</span>
-                                      )}
-                                    </td>
+                            <tbody>
+                              {modalRows
+                                .filter((r) => mobileMatches(r.mobile, modalMobileSearch))
+                                .map((row, idx) => {
+                                  const rowKey = row.leadKey || row.id;
+                                  const isEditing = editingRowId && editingRowId === rowKey && editRowData;
 
-                                    <td>
-                                      {isEditing ? (
-                                        <select
-                                          className="form-select form-select-sm"
-                                          value={editRowData.project || ""}
-                                          onChange={(e) =>
-                                            handleEditRowChange("project", e.target.value)
-                                          }
-                                        >
-                                          <option value="">Select project</option>
-                                          {PROJECT_OPTIONS.map((p) => (
-                                            <option key={p} value={p}>
-                                              {p}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        row.project || "—"
-                                      )}
-                                    </td>
-
-                                    <td>
-                                      {isEditing ? (
-                                        <select
-                                          className="form-select form-select-sm"
-                                          value={editRowData.status || ""}
-                                          onChange={(e) =>
-                                            handleEditRowChange("status", e.target.value)
-                                          }
-                                        >
-                                          <option value="">Select status</option>
-                                          <option value="Details_shared">Details_shared</option>
-                                          <option value="NR/SF">NR/SF</option>
-                                          <option value="Visit Scheduled">Visit Scheduled</option>
-                                          <option value="RNR">RNR</option>
-                                          <option value="Site Visited">Site Visited</option>
-                                          <option value="Booked">Booked</option>
-                                          <option value="Invalid">Invalid</option>
-                                          <option value="Not Interested">Not Interested</option>
-                                          <option value="Location Issue">Location Issue</option>
-                                          <option value="CP">CP</option>
-                                          <option value="Budget Issue">Budget Issue</option>
-                                          <option value="Visit Postponed">Visit Postponed</option>
-                                          <option value="Closed">Closed</option>
-                                          <option value="Busy">Busy</option>
-                                        </select>
-                                      ) : (
-                                        <div className="d-flex flex-column gap-1">
-                                          <span className="small text-dark">{row.status || "—"}</span>
-                                          {row.verification_call && (
-                                            <span
-                                              className="badge rounded-pill"
-                                              style={{
-                                                width: "fit-content",
-                                                backgroundColor: "#f97316",
-                                                color: "#fff",
-                                                fontSize: "0.65rem",
-                                              }}
-                                            >
-                                              Verification Call
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
-                                    </td>
-
-                                    {/* Remarks */}
-                                    <td>
-                                      {isEditing ? (
-                                        <div className="d-flex flex-column gap-1">
-                                          <textarea
-                                            rows={2}
-                                            className="form-control form-control-sm"
-                                            value={editRowData.remarks || ""}
-                                            onChange={(e) =>
-                                              handleEditRowChange("remarks", e.target.value)
+                                  return (
+                                    <tr
+                                      key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
+                                      style={
+                                        row.verification_call
+                                          ? {
+                                              backgroundColor: "#fff7ed",
+                                              borderLeft: "4px solid #f97316",
                                             }
-                                            placeholder="Type new remark..."
-                                          />
+                                          : undefined
+                                      }
+                                    >
+                                      <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
+                                      <td>{row.name || "—"}</td>
 
-                                          <div className="d-flex justify-content-end">
+                                      <td>
+                                        {isEditing ? (
+                                          <input
+                                            type="text"
+                                            className="form-control form-control-sm"
+                                            list="source-options"
+                                            value={editRowData.source || ""}
+                                            onChange={(e) => handleEditRowChange("source", e.target.value)}
+                                            placeholder="Select or type source"
+                                          />
+                                        ) : (
+                                          <span className="small text-dark">{row.source || "—"}</span>
+                                        )}
+                                      </td>
+
+                                      <td>
+                                        {isEditing ? (
+                                          <select
+                                            className="form-select form-select-sm"
+                                            value={editRowData.project || ""}
+                                            onChange={(e) => handleEditRowChange("project", e.target.value)}
+                                          >
+                                            <option value="">Select project</option>
+                                            {PROJECT_OPTIONS.map((p) => (
+                                              <option key={p} value={p}>
+                                                {p}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        ) : (
+                                          row.project || "—"
+                                        )}
+                                      </td>
+
+                                      <td>
+                                        {isEditing ? (
+                                          <select
+                                            className="form-select form-select-sm"
+                                            value={editRowData.status || ""}
+                                            onChange={(e) => handleEditRowChange("status", e.target.value)}
+                                          >
+                                            <option value="">Select status</option>
+                                            <option value="Details_shared">Details_shared</option>
+                                            <option value="NR/SF">NR/SF</option>
+                                            <option value="Visit Scheduled">Visit Scheduled</option>
+                                            <option value="RNR">RNR</option>
+                                            <option value="Site Visited">Site Visited</option>
+                                            <option value="Booked">Booked</option>
+                                            <option value="Invalid">Invalid</option>
+                                            <option value="Not Interested">Not Interested</option>
+                                            <option value="Location Issue">Location Issue</option>
+                                            <option value="CP">CP</option>
+                                            <option value="Budget Issue">Budget Issue</option>
+                                            <option value="Visit Postponed">Visit Postponed</option>
+                                            <option value="Closed">Closed</option>
+                                            <option value="Busy">Busy</option>
+                                          </select>
+                                        ) : (
+                                          <div className="d-flex flex-column gap-1">
+                                            <span className="small text-dark">{row.status || "—"}</span>
+                                            {row.verification_call && (
+                                              <span
+                                                className="badge rounded-pill"
+                                                style={{
+                                                  width: "fit-content",
+                                                  backgroundColor: "#f97316",
+                                                  color: "#fff",
+                                                  fontSize: "0.65rem",
+                                                }}
+                                              >
+                                                Verification Call
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
+
+                                      {/* Remarks */}
+                                      <td>
+                                        {isEditing ? (
+                                          <div className="d-flex flex-column gap-1">
+                                            <textarea
+                                              rows={2}
+                                              className="form-control form-control-sm"
+                                              value={editRowData.remarks || ""}
+                                              onChange={(e) => handleEditRowChange("remarks", e.target.value)}
+                                              placeholder="Type new remark..."
+                                            />
+
+                                            <div className="d-flex justify-content-end">
+                                              <button
+                                                type="button"
+                                                className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
+                                                onClick={() => setShowPrevRemarks((v) => !v)}
+                                                disabled={!editRowData?.prevRemarks}
+                                                title="Show previous remarks"
+                                              >
+                                                <MessageSquareText size={14} />
+                                                <span>Remarks</span>
+                                                {showPrevRemarks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                              </button>
+                                            </div>
+
+                                            {showPrevRemarks && (
+                                              <div
+                                                className="small text-muted"
+                                                style={{
+                                                  background: "#f8fafc",
+                                                  border: "1px solid #e2e8f0",
+                                                  borderRadius: 8,
+                                                  padding: "8px 10px",
+                                                  whiteSpace: "pre-wrap",
+                                                }}
+                                              >
+                                                <div className="fw-semibold text-dark mb-1">Previous remarks</div>
+                                                {editRowData?.prevRemarks ? (
+                                                  editRowData.prevRemarks
+                                                ) : (
+                                                  <span className="text-muted">No previous remarks</span>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="small text-muted">{row.remarks || "—"}</span>
+                                        )}
+                                      </td>
+
+                                      <td>
+                                        {isEditing ? (
+                                          <input
+                                            type="datetime-local"
+                                            className="form-control form-control-sm"
+                                            value={editRowData.date || ""}
+                                            onChange={(e) => handleEditRowChange("date", e.target.value)}
+                                            disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
+                                          />
+                                        ) : (
+                                          <span className="small fw-semibold">
+                                            {row.date ? formatDateTime(row.date) : "—"}
+                                          </span>
+                                        )}
+                                      </td>
+
+                                      <td>
+                                        <span className="small text-dark">{row.Assigned_to || "—"}</span>
+                                      </td>
+
+                                      {/* ✅ Admin: show createdBy/updatedBy */}
+                                      {role === "admin" && (
+                                        <td>
+                                          <span className="small text-dark">{row.createdBy || "—"}</span>
+                                        </td>
+                                      )}
+                                      {role === "admin" && (
+                                        <td>
+                                          <span className="small text-dark">{row.updatedBy || "—"}</span>
+                                        </td>
+                                      )}
+
+                                      <td>
+                                        {isEditing ? (
+                                          <div className="d-flex flex-column gap-1">
                                             <button
                                               type="button"
-                                              className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
-                                              onClick={() => setShowPrevRemarks((v) => !v)}
-                                              disabled={!editRowData?.prevRemarks}
-                                              title="Show previous remarks"
+                                              className="btn btn-sm btn-success"
+                                              onClick={handleSaveEditRow}
                                             >
-                                              <MessageSquareText size={14} />
-                                              <span>Remarks</span>
-                                              {showPrevRemarks ? (
-                                                <ChevronUp size={14} />
-                                              ) : (
-                                                <ChevronDown size={14} />
-                                              )}
+                                              Save
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="btn btn-sm btn-outline-secondary"
+                                              onClick={cancelEditRow}
+                                            >
+                                              Cancel
                                             </button>
                                           </div>
-
-                                          {showPrevRemarks && (
-                                            <div
-                                              className="small text-muted"
-                                              style={{
-                                                background: "#f8fafc",
-                                                border: "1px solid #e2e8f0",
-                                                borderRadius: 8,
-                                                padding: "8px 10px",
-                                                whiteSpace: "pre-wrap",
-                                              }}
-                                            >
-                                              <div className="fw-semibold text-dark mb-1">
-                                                Previous remarks
-                                              </div>
-                                              {editRowData?.prevRemarks ? (
-                                                editRowData.prevRemarks
-                                              ) : (
-                                                <span className="text-muted">No previous remarks</span>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <span className="small text-muted">{row.remarks || "—"}</span>
-                                      )}
-                                    </td>
-
-                                    <td>
-                                      {isEditing ? (
-                                        <input
-                                          type="datetime-local"
-                                          className="form-control form-control-sm"
-                                          value={editRowData.date || ""}
-                                          onChange={(e) => handleEditRowChange("date", e.target.value)}
-                                          // ✅ RNR is now editable (only NR/SF and Busy lock)
-                                          disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
-                                        />
-                                      ) : (
-                                        <span className="small fw-semibold">
-                                          {row.date ? formatDateTime(row.date) : "—"}
-                                        </span>
-                                      )}
-                                    </td>
-
-                                    <td>
-                                      <span className="small text-dark">
-                                        {row.Assigned_to || "—"}
-                                      </span>
-                                    </td>
-
-                                    <td>
-                                      {isEditing ? (
-                                        <div className="d-flex flex-column gap-1">
+                                        ) : (
                                           <button
                                             type="button"
-                                            className="btn btn-sm btn-success"
-                                            onClick={handleSaveEditRow}
+                                            className="btn btn-sm btn-outline-primary"
+                                            onClick={() => startEditRow(row)}
                                           >
-                                            Save
+                                            Edit
                                           </button>
-                                          <button
-                                            type="button"
-                                            className="btn btn-sm btn-outline-secondary"
-                                            onClick={cancelEditRow}
-                                          >
-                                            Cancel
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm btn-outline-primary"
-                                          onClick={() => startEditRow(row)}
-                                        >
-                                          Edit
-                                        </button>
-                                      )}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                          </tbody>
-                        </table>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                            </tbody>
+                          </table>
+                        )}
                       </div>
                     )}
                   </div>
 
                   <div className="modal-footer bg-light border-top">
                     <div className="me-auto small text-muted">
-                      Showing{" "}
-                      <strong>
-                        {modalRows.filter((r) => mobileMatches(r.mobile, modalMobileSearch)).length}
-                      </strong>{" "}
-                      record(s)
+                      {isAdminAddedByUserModal ? (
+                        <>
+                          Showing <strong>{modalRows.length}</strong> user(s)
+                        </>
+                      ) : (
+                        <>
+                          Showing{" "}
+                          <strong>
+                            {modalRows.filter((r) => mobileMatches(r.mobile, modalMobileSearch)).length}
+                          </strong>{" "}
+                          record(s)
+                        </>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm"
-                      onClick={closeModal}
-                    >
+                    <button type="button" className="btn btn-outline-secondary btn-sm" onClick={closeModal}>
                       Close
                     </button>
                   </div>
@@ -1850,11 +1980,7 @@ export function UserDashboard() {
               </div>
             </div>
 
-            <div
-              className="modal-backdrop fade show"
-              onClick={closeModal}
-              style={{ cursor: "pointer" }}
-            />
+            <div className="modal-backdrop fade show" onClick={closeModal} style={{ cursor: "pointer" }} />
           </>
         )}
 
@@ -1862,10 +1988,7 @@ export function UserDashboard() {
         {showAddModal && (
           <div className="fixed inset-0 z-50 d-flex align-items-center justify-content-center bg-black bg-opacity-25">
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>
-              <div
-                className="rounded-4 bg-white border border-slate-200 shadow-2xl"
-                style={{ maxHeight: "80vh", overflowY: "auto" }}
-              >
+              <div className="rounded-4 bg-white border border-slate-200 shadow-2xl" style={{ maxHeight: "80vh", overflowY: "auto" }}>
                 <div className="d-flex align-items-center justify-content-between px-4 py-3 border-bottom">
                   <h5 className="mb-0 fw-semibold d-flex align-items-center gap-2">
                     <span
@@ -1882,11 +2005,7 @@ export function UserDashboard() {
                     </span>
                     Add New Lead
                   </h5>
-                  <button
-                    type="button"
-                    className="btn btn-link p-0 text-muted"
-                    onClick={closeAddLeadModal}
-                  >
+                  <button type="button" className="btn btn-link p-0 text-muted" onClick={closeAddLeadModal}>
                     <CircleXIcon size={22} />
                   </button>
                 </div>
