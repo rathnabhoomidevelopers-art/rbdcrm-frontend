@@ -45,7 +45,7 @@ const PROJECT_OPTIONS = [
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
 
-// ✅ Change: RNR should NOT lock date in edit (and even in add, your request is mainly edit)
+// Change: RNR should NOT lock date in edit (and even in add, your request is mainly edit)
 // We'll lock only NR/SF and Busy.
 const HARD_LOCK_STATUSES = ["NR/SF", "Busy"];
 
