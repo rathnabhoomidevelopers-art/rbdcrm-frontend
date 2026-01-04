@@ -537,7 +537,7 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       }
     }
 
-    // ✅ dob rules:
+    // dob rules:
     // - Visit Scheduled requires dob
     // - AUTO_24H_STATUSES => tomorrow 9AM if dob missing/invalid
     let dob = req.body.dob ? new Date(req.body.dob) : null;
@@ -555,7 +555,7 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       tomorrow.setHours(9, 0, 0, 0);
       dob = tomorrow;
     }
-
+    const actor = (req.user?.user_name || "").toString().trim().toLowerCase();
     const lead = {
       lead_id: new ObjectId().toHexString(),
       name: req.body.name || null,
@@ -569,7 +569,9 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       dob: dob,
       Assigned_to: assignedTo || null,
       createdAt: new Date(),
-
+      updatedAt: new Date(), 
+      createdBy: actor || null,
+      updatedBy: actor || null, 
       verification_call: false,
       original_assigned: null,
       transfer_date: null,
@@ -606,15 +608,6 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
-// ✅ BULK ADD LEADS (FAST) + Round Robin for admin uploads
-/**
- * ✅ UPDATED (your requirement):
- * - Skip existing mobile numbers (already done)
- * - Create follow-up ONLY if BOTH status + remarks are present (non-empty) AND status is TRACKED
- * - AUTO_24H_STATUSES => tomorrow 9AM if dob missing/invalid
- * - Visit Scheduled requires dob (invalid row if missing)
- * - Trim status/remarks to avoid "   " getting treated as valid
- */
 app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
   const items = Array.isArray(req.body?.leads) ? req.body.leads : [];
 
@@ -655,6 +648,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
     const followUpsCol = database.collection("follow-ups");
     const usersCol = database.collection("users");
     const settingsCol = database.collection("settings");
+    
 
     const seenInFile = new Set();
     const valid = [];
@@ -683,7 +677,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
         ? row.Assigned_to.toString().trim().toLowerCase()
         : null;
 
-      // ✅ UPDATED: treat spaces as empty
+      // UPDATED: treat spaces as empty
       if (assignedTo && !assignedTo.trim()) assignedTo = null;
 
       // user upload -> self if missing
@@ -692,11 +686,11 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       // admin upload -> keep blank for now; we will assign RR in one pass after dedupe
       if (!assignedTo && isAdmin) assignedTo = null;
 
-      // ✅ Normalize status + remarks (trim)
+      // Normalize status + remarks (trim)
       const status = row.status ? row.status.toString().trim() : null;
       const remarks = row.remarks ? row.remarks.toString().trim() : null;
 
-      // ✅ dob rules
+      // dob rules
       let dob = row.dob ? new Date(row.dob) : null;
       if (dob && Number.isNaN(dob.getTime())) dob = null;
 
@@ -715,7 +709,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
         tomorrow.setHours(9, 0, 0, 0);
         dob = tomorrow;
       }
-
+      const actor = (req.user?.user_name || "").toString().trim().toLowerCase();
       valid.push({
         lead_id: new ObjectId().toHexString(),
         name: row.name || null,
@@ -729,6 +723,9 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
         dob: dob,
         Assigned_to: assignedTo,
         createdAt: new Date(),
+        updatedAt: new Date(),
+        createdBy: actor || null,
+        updatedBy: actor || null,
         verification_call: false,
         original_assigned: null,
         transfer_date: null,
@@ -882,6 +879,8 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const currentUser = (req.user?.user_name || "").toString().trim().toLowerCase();
     const responseData = { message: "Lead updated successfully" };
 
+    update.updatedAt = new Date();
+    update.updatedBy = currentUser || null; 
     // Helper: choose least-loaded user excluding current user
     async function pickNextUser(excludeUserName) {
       const allUsers = await usersCol
@@ -949,7 +948,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
       }
     }
 
-    // ✅ Transfer logic for Busy / NR-SF / RNR (only if not already verification_call)
+    // Transfer logic for Busy / NR-SF / RNR (only if not already verification_call)
     const shouldTransferCheck =
       !existingLead.verification_call &&
       (newStatus === "Busy" || newStatus === "NR/SF" || newStatus === "RNR");
@@ -988,7 +987,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const isTracked = !!(nextStatus && TRACKED_STATUSES.includes(nextStatus));
     const hasRemarks = !!((nextLead.remarks || "").toString().trim());
 
-    // ✅ Follow-up sync (UPDATED RULE):
+    // Follow-up sync (UPDATED RULE):
     // - If NOT tracked OR NO remarks => remove follow-up
     // - Else upsert follow-up
     if (!isTracked || !hasRemarks) {
@@ -1048,9 +1047,7 @@ app.delete("/delete-lead/:id", auth(["admin"]), async (req, res) => {
   }
 });
 
-/* =========================
-   STATUS SETTINGS
-========================= */
+/* STATUS SETTINGS */
 
 app.post("/statuslist", auth(["admin"]), async (req, res) => {
   const status = {
