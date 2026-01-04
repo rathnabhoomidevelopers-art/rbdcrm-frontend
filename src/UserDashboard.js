@@ -34,7 +34,7 @@ const SOURCE_OPTIONS = [
 const PROJECT_OPTIONS = [
   "Northern Lights",
   "Gk hill view",
-  "Novera farmland",
+  "Novara farmland",
   "Konig villa homes",
   "Sattva lumino",
   "Godrej woods",
