@@ -161,7 +161,10 @@ export function UserDashboard() {
     totalFollowUps: 0,
     totalSiteVisits: 0,
     totalBooked: 0,
+    addedToday: 0,
+    updatedToday: 0,
   });
+
 
   const [followUpAlerts, setFollowUpAlerts] = useState({
     overdue: [],
@@ -280,6 +283,26 @@ export function UserDashboard() {
         0,
         0
       );
+      // NEW: today range
+      const endOfToday = new Date(startOfToday);
+      endOfToday.setDate(endOfToday.getDate() + 1);
+
+      // NEW: helper
+      const isToday = (d) => {
+        const dt = d ? new Date(d) : null;
+        if (!dt || Number.isNaN(dt.getTime())) return false;
+        return dt >= startOfToday && dt < endOfToday;
+      };
+
+      // NEW: counts
+      const addedToday = leads.filter(
+        (l) => isToday(l.createdAt) && (l.createdBy || "").toString().trim().toLowerCase() === username
+      ).length;
+
+      const updatedToday = leads.filter(
+        (l) => isToday(l.updatedAt) && (l.updatedBy || "").toString().trim().toLowerCase() === username
+      ).length;
+
       const startOfTomorrow = new Date(startOfToday);
       startOfTomorrow.setDate(startOfToday.getDate() + 1);
       const startOfDayAfterTomorrow = new Date(startOfToday);
@@ -307,7 +330,12 @@ export function UserDashboard() {
         totalFollowUps,
         totalSiteVisits,
         totalBooked,
+
+        // ✅ NEW
+        addedToday,
+        updatedToday,
       });
+
 
       setFollowUpAlerts({
         overdue: sortByDate(overdue),
@@ -1120,6 +1148,7 @@ export function UserDashboard() {
 
         {/* SUMMARY CARDS */}
         <div className="row g-3 mb-4">
+          {/* Total Leads */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1143,6 +1172,7 @@ export function UserDashboard() {
             </div>
           </div>
 
+          {/* Follow-Ups */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1166,6 +1196,7 @@ export function UserDashboard() {
             </div>
           </div>
 
+          {/* Site Visits */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1189,6 +1220,7 @@ export function UserDashboard() {
             </div>
           </div>
 
+          {/* Booked */}
           <div className="col-12 col-md-6 col-xl-3">
             <div
               className="card border-0 shadow-sm h-100"
@@ -1211,7 +1243,48 @@ export function UserDashboard() {
               </div>
             </div>
           </div>
+
+          {/* ✅ Added Today */}
+          <div className="col-12 col-md-6 col-xl-3">
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: "1.1rem" }}>
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#e9d5ff" }}
+                >
+                  <Users size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Added Today</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.addedToday}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ✅ Updated Today */}
+          <div className="col-12 col-md-6 col-xl-3">
+            <div className="card border-0 shadow-sm h-100" style={{ borderRadius: "1.1rem" }}>
+              <div className="card-body d-flex align-items-center gap-3">
+                <div
+                  className="rounded-circle d-flex align-items-center justify-content-center"
+                  style={{ width: 46, height: 46, backgroundColor: "#fee2e2" }}
+                >
+                  <RefreshCw size={20} />
+                </div>
+                <div>
+                  <div className="small text-muted">Updated Today</div>
+                  <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
+                    {stats.updatedToday}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+
 
         {/* FOLLOW-UP ALERTS SECTION */}
         <div className="row g-3 mb-4">
