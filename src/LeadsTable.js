@@ -31,9 +31,23 @@ const SOURCE_OPTIONS = [
   "Walk-in",
   "Referral",
   "99acres",
+  "Shilpa K Leads",
+  "Roopa Leads",
+  "Shilpa G Leads",
+  "Sreyash Leads"
 ];
 
-const PROJECT_OPTIONS = ["Northern Lights", "Gruhakalpa", "Nandi Hill View"];
+const PROJECT_OPTIONS = [
+  "Northern Lights",
+  "Gk hill view",
+  "Novara farmland",
+  "Konig villa homes",
+  "Sattva lumino",
+  "Godrej woods",
+  "Ranka ankura",
+  "Vajram vivera",
+  "SLV golden towers",
+];
 
 const normalizeAndValidateMobile = (raw) => {
   if (!raw) {

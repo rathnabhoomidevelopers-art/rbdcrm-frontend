@@ -1,4 +1,3 @@
-// server.js
 require("dotenv").config();
 const { MongoClient, ObjectId } = require("mongodb");
 const express = require("express");
@@ -32,11 +31,9 @@ const TRACKED_STATUSES = [
   "Closed",
 ];
 
-/* =========================
-   ✅ Manual CORS (Vercel-safe)
-   - Always responds to OPTIONS with headers + 204
-   - Prevents "No Access-Control-Allow-Origin" preflight failures
-========================= */
+// ✅ Statuses that should auto-set dob to tomorrow 9AM if dob missing/invalid
+const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
+
 const allowedOrigins = new Set([
   "https://www.rbdcrm.com",
   "https://rbdcrm.com",
@@ -52,9 +49,7 @@ app.use((req, res, next) => {
 
   if (allowedOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin"); // IMPORTANT for caching/CDN
-    // You are using Bearer token (localStorage), not cookies -> credentials not needed.
-    // res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin");
 
     res.setHeader(
       "Access-Control-Allow-Methods",
@@ -66,10 +61,7 @@ app.use((req, res, next) => {
     );
   }
 
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
@@ -96,9 +88,7 @@ function auth(allowedRoles = []) {
       ? authHeader.slice(7)
       : null;
 
-    if (!token) {
-      return res.status(401).json({ message: "No token provided" });
-    }
+    if (!token) return res.status(401).json({ message: "No token provided" });
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
@@ -129,6 +119,84 @@ app.get("/health", (req, res) => {
   });
 });
 
+/* ======================================================
+   ✅ ROUND ROBIN HELPERS
+   Uses settings collection doc:
+   { "_id": "rr_lead_assign", "lastIndex": 0 }
+====================================================== */
+
+async function getActiveUsers_(usersCol) {
+  // You can add extra filter here if you maintain "isActive: true"
+  const users = await usersCol
+    .find({ role: "user" }, { projection: { user_name: 1 } })
+    .sort({ user_name: 1 })
+    .toArray();
+
+  return users
+    .map((u) => (u.user_name || "").toString().trim().toLowerCase())
+    .filter(Boolean);
+}
+
+async function pickRoundRobinUser_(settingsCol, usersCol) {
+  const users = await getActiveUsers_(usersCol);
+  if (!users.length) return null;
+
+  // read current index (create if missing)
+  const rr = await settingsCol.findOne({ _id: "rr_lead_assign" });
+  let lastIndex = typeof rr?.lastIndex === "number" ? rr.lastIndex : 0;
+
+  // Next user index
+  const nextIndex = lastIndex % users.length;
+  const pickedUser = users[nextIndex];
+
+  // update settings for next call
+  const newLastIndex = (nextIndex + 1) % users.length;
+
+  await settingsCol.updateOne(
+    { _id: "rr_lead_assign" },
+    { $set: { lastIndex: newLastIndex, updatedAt: new Date() } },
+    { upsert: true }
+  );
+
+  return pickedUser;
+}
+
+/**
+ * ✅ UPDATED:
+ * - Treat null/""/"   " as unassigned
+ * - Normalize existing Assigned_to to lowercase trimmed
+ */
+async function assignRoundRobinToLeads_(leads, settingsCol, usersCol) {
+  const users = await getActiveUsers_(usersCol);
+  if (!users.length) return leads;
+
+  const rr = await settingsCol.findOne({ _id: "rr_lead_assign" });
+  let lastIndex = typeof rr?.lastIndex === "number" ? rr.lastIndex : 0;
+
+  let idx = lastIndex % users.length;
+
+  for (const l of leads) {
+    const current = (l.Assigned_to || "").toString().trim();
+
+    // only assign if Assigned_to is empty/blank
+    if (!current) {
+      l.Assigned_to = users[idx];
+      idx = (idx + 1) % users.length;
+    } else {
+      // normalize
+      l.Assigned_to = current.toLowerCase();
+    }
+  }
+
+  await settingsCol.updateOne(
+    { _id: "rr_lead_assign" },
+    { $set: { lastIndex: idx, updatedAt: new Date() } },
+    { upsert: true }
+  );
+
+  return leads;
+}
+
 /* =========================
    AUTH
 ========================= */
@@ -148,7 +216,6 @@ app.post("/auth/admin-login", async (req, res) => {
     const usersCol = database.collection("users");
 
     const user = await usersCol.findOne({ user_id: user_id });
-
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     let isMatch = false;
@@ -157,7 +224,6 @@ app.post("/auth/admin-login", async (req, res) => {
     } else {
       isMatch = user.password === password;
     }
-
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
     const role = user.role || "admin";
@@ -206,7 +272,6 @@ app.post("/auth/user-login", async (req, res) => {
     const usersCol = database.collection("users");
 
     const user = await usersCol.findOne({ user_name: normalizedName });
-
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     let isMatch = false;
@@ -215,7 +280,6 @@ app.post("/auth/user-login", async (req, res) => {
     } else {
       isMatch = user.password === password;
     }
-
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
     const role = user.role || "user";
@@ -275,15 +339,14 @@ app.post("/add-user", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    // prevent duplicate user_name
-    const existing = await database.collection("users").findOne({ user_name: normalizedName });
+    const existing = await database
+      .collection("users")
+      .findOne({ user_name: normalizedName });
     if (existing) {
       return res.status(409).json({ message: "User already exists" });
     }
 
     await database.collection("users").insertOne(user);
-
-    console.log("User added successfully!..");
     return res.status(201).json({ message: "User added successfully" });
   } catch (err) {
     console.error("Add user error:", err);
@@ -316,6 +379,11 @@ app.get("/users", auth(["admin", "user"]), async (req, res) => {
    LEADS
 ========================= */
 
+/**
+ * ✅ UPDATED:
+ * - If admin calls GET /leads, auto-assign any existing unassigned leads (Assigned_to null/""/missing)
+ * - This fixes leads inserted directly via Mongo/n8n/Google Sheet that bypass /add-lead endpoints.
+ */
 app.get("/leads", auth(["admin", "user"]), async (req, res) => {
   let clientObj;
   try {
@@ -323,6 +391,47 @@ app.get("/leads", auth(["admin", "user"]), async (req, res) => {
     const database = clientObj.db("crm");
     const collection = database.collection("leads");
 
+    // ✅ Admin backfill auto-assign for any unassigned leads
+    if (req.user.role === "admin") {
+      const settingsCol = database.collection("settings");
+      const usersCol = database.collection("users");
+
+      // Get unassigned lead IDs
+      const unassigned = await collection
+        .find(
+          {
+            $or: [
+              { Assigned_to: null },
+              { Assigned_to: "" },
+              { Assigned_to: { $exists: false } },
+            ],
+          },
+          { projection: { _id: 1, Assigned_to: 1 } }
+        )
+        .sort({ createdAt: 1 })
+        .toArray();
+
+      if (unassigned.length) {
+        // build temp objects for RR helper
+        const temp = unassigned.map((x) => ({
+          _id: x._id,
+          Assigned_to: x.Assigned_to,
+        }));
+
+        await assignRoundRobinToLeads_(temp, settingsCol, usersCol);
+
+        // persist to DB
+        const bulk = collection.initializeUnorderedBulkOp();
+        for (const t of temp) {
+          bulk.find({ _id: t._id }).updateOne({
+            $set: { Assigned_to: t.Assigned_to, assignedAt: new Date() },
+          });
+        }
+        await bulk.execute();
+      }
+    }
+
+    // Normal query behavior
     let query = {};
     if (req.user.role === "user" && req.user.user_name) {
       const normalized = req.user.user_name.toString().trim().toLowerCase();
@@ -330,7 +439,6 @@ app.get("/leads", auth(["admin", "user"]), async (req, res) => {
     }
 
     const docs = await collection.find(query).toArray();
-
     const normalizedDocs = docs.map((doc) => ({
       ...doc,
       lead_id: doc.lead_id || (doc._id ? doc._id.toString() : undefined),
@@ -355,9 +463,7 @@ app.get("/lead/:id", auth(["admin", "user"]), async (req, res) => {
   try {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
-
     const doc = await database.collection("leads").findOne({ $or: orFilters });
-
     if (!doc) return res.status(404).json({ message: "Lead not found" });
     return res.status(200).json(doc);
   } catch (err) {
@@ -368,9 +474,18 @@ app.get("/lead/:id", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
+/**
+ * ✅ /add-lead
+ * - If admin adds a lead without Assigned_to -> Round Robin assign
+ * - If user adds a lead without Assigned_to -> assign to self (existing behavior)
+ *
+ * ✅ UPDATED (your requirement):
+ * - Create follow-up ONLY if BOTH status + remarks are present (non-empty) AND status is TRACKED
+ */
 app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   const mobile = (req.body.mobile || "").toString().trim();
-  if (!mobile) return res.status(400).json({ message: "Mobile number is required" });
+  if (!mobile)
+    return res.status(400).json({ message: "Mobile number is required" });
 
   // Mobile normalize/validate
   let digits = mobile.replace(/\D/g, "");
@@ -378,19 +493,20 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
 
   if (digits.length !== 10 || !/^[6-9]\d{9}$/.test(digits)) {
-    return res
-      .status(400)
-      .json({ message: "Enter a valid 10-digit mobile number starting with 6-9" });
+    return res.status(400).json({
+      message: "Enter a valid 10-digit mobile number starting with 6-9",
+    });
   }
 
-  // ✅ Fix: if normal user is adding lead and Assigned_to missing -> assign to self
+  // ✅ UPDATED: treat spaces as empty
   let assignedTo = req.body.Assigned_to
     ? req.body.Assigned_to.toString().trim().toLowerCase()
     : null;
+  if (assignedTo && !assignedTo.trim()) assignedTo = null;
 
-  if (!assignedTo && req.user?.role === "user" && req.user?.user_name) {
-    assignedTo = req.user.user_name.toString().trim().toLowerCase();
-  }
+  // ✅ Normalize status + remarks
+  const status = req.body.status ? req.body.status.toString().trim() : null;
+  const remarks = req.body.remarks ? req.body.remarks.toString().trim() : null;
 
   let clientObj;
   try {
@@ -398,18 +514,42 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     const database = clientObj.db("crm");
     const leadsCol = database.collection("leads");
     const followUpsCol = database.collection("follow-ups");
+    const usersCol = database.collection("users");
+    const settingsCol = database.collection("settings");
 
     const existing = await leadsCol.findOne({ mobile: digits });
     if (existing) {
       return res.status(409).json({
         message: "Lead with this mobile number already exists",
-        lead_id: existing.lead_id || (existing._id ? existing._id.toString() : null),
+        lead_id:
+          existing.lead_id || (existing._id ? existing._id.toString() : null),
       });
     }
 
-    // Busy default date = tomorrow 9AM
+    // ✅ Assign rules:
+    // - If user role and missing assigned -> self
+    // - If admin role and missing assigned -> round robin
+    if (!assignedTo) {
+      if (req.user?.role === "user" && req.user?.user_name) {
+        assignedTo = req.user.user_name.toString().trim().toLowerCase();
+      } else if (req.user?.role === "admin") {
+        assignedTo = await pickRoundRobinUser_(settingsCol, usersCol);
+      }
+    }
+
+    // ✅ dob rules:
+    // - Visit Scheduled requires dob
+    // - AUTO_24H_STATUSES => tomorrow 9AM if dob missing/invalid
     let dob = req.body.dob ? new Date(req.body.dob) : null;
-    if (req.body.status === "Busy" && !dob) {
+    if (dob && Number.isNaN(dob.getTime())) dob = null;
+
+    if (status === "Visit Scheduled" && !dob) {
+      return res.status(400).json({
+        message: "Visit Scheduled requires a valid dob/date",
+      });
+    }
+
+    if (AUTO_24H_STATUSES.includes(status) && !dob) {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       tomorrow.setHours(9, 0, 0, 0);
@@ -421,16 +561,15 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       name: req.body.name || null,
       mobile: digits,
       source: req.body.source || null,
-      status: req.body.status || null,
+      status: status || null,
       job_role: req.body.job_role || null,
       budget: req.body.budget || null,
       project: req.body.project || null,
-      remarks: req.body.remarks || null,
+      remarks: remarks || null,
       dob: dob,
-      Assigned_to: assignedTo,
+      Assigned_to: assignedTo || null,
       createdAt: new Date(),
 
-      // verification transfer fields
       verification_call: false,
       original_assigned: null,
       transfer_date: null,
@@ -438,8 +577,9 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
 
     await leadsCol.insertOne(lead);
 
-    // Auto-create follow-up if tracked
-    if (lead.status && TRACKED_STATUSES.includes(lead.status)) {
+    // ✅ FOLLOW-UP CREATION RULE (UPDATED):
+    // Create follow-up ONLY if status is tracked AND remarks is present (non-empty)
+    if (lead.status && TRACKED_STATUSES.includes(lead.status) && lead.remarks) {
       const followUpDate = lead.dob || new Date();
       const follow_up = {
         followup_id: lead.lead_id,
@@ -466,34 +606,46 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
-// ✅ BULK ADD LEADS (FAST)
+// ✅ BULK ADD LEADS (FAST) + Round Robin for admin uploads
+/**
+ * ✅ UPDATED (your requirement):
+ * - Skip existing mobile numbers (already done)
+ * - Create follow-up ONLY if BOTH status + remarks are present (non-empty) AND status is TRACKED
+ * - AUTO_24H_STATUSES => tomorrow 9AM if dob missing/invalid
+ * - Visit Scheduled requires dob (invalid row if missing)
+ * - Trim status/remarks to avoid "   " getting treated as valid
+ */
 app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
   const items = Array.isArray(req.body?.leads) ? req.body.leads : [];
 
   if (!items.length) {
-    return res.status(400).json({ message: "No leads provided. Send { leads: [...] }" });
+    return res.status(400).json({
+      message: "No leads provided. Send { leads: [...] }",
+    });
   }
 
-  // helper: normalize/validate mobile to 10 digits
   const normalizeMobile = (raw) => {
-    if (raw === undefined || raw === null) return { ok: false, digits: "", error: "Mobile missing" };
+    if (raw === undefined || raw === null)
+      return { ok: false, digits: "", error: "Mobile missing" };
 
     let digits = raw.toString().replace(/\D/g, "");
     if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
     if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
 
-    if (digits.length !== 10) {
+    if (digits.length !== 10)
       return { ok: false, digits, error: "Mobile must be 10 digits" };
-    }
-    if (!/^[6-9]\d{9}$/.test(digits)) {
-      return { ok: false, digits, error: "Mobile must start with 6-9" };
-    }
+    if (!/^[6-9]\d{9}$/.test(digits))
+      return {
+        ok: false,
+        digits,
+        error: "Mobile must start with 6-9",
+      };
     return { ok: true, digits, error: null };
   };
 
-  // assign-to rule (same as /add-lead)
   const currentUser = (req.user?.user_name || "").toString().trim().toLowerCase();
   const isUser = req.user?.role === "user";
+  const isAdmin = req.user?.role === "admin";
 
   let clientObj;
   try {
@@ -501,8 +653,9 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
     const database = clientObj.db("crm");
     const leadsCol = database.collection("leads");
     const followUpsCol = database.collection("follow-ups");
+    const usersCol = database.collection("users");
+    const settingsCol = database.collection("settings");
 
-    // 1) Validate + normalize + dedupe inside uploaded file
     const seenInFile = new Set();
     const valid = [];
     const invalid = [];
@@ -517,40 +670,62 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       }
 
       if (seenInFile.has(nm.digits)) {
-        invalid.push({ row: i + 1, mobile: nm.digits, reason: "Duplicate mobile in uploaded file" });
+        invalid.push({
+          row: i + 1,
+          mobile: nm.digits,
+          reason: "Duplicate mobile in uploaded file",
+        });
         continue;
       }
       seenInFile.add(nm.digits);
 
-      // normalize Assigned_to
       let assignedTo = row.Assigned_to
         ? row.Assigned_to.toString().trim().toLowerCase()
         : null;
 
+      // ✅ UPDATED: treat spaces as empty
+      if (assignedTo && !assignedTo.trim()) assignedTo = null;
+
+      // user upload -> self if missing
       if (!assignedTo && isUser && currentUser) assignedTo = currentUser;
 
-      // Busy default dob = tomorrow 9AM (same as /add-lead)
+      // admin upload -> keep blank for now; we will assign RR in one pass after dedupe
+      if (!assignedTo && isAdmin) assignedTo = null;
+
+      // ✅ Normalize status + remarks (trim)
+      const status = row.status ? row.status.toString().trim() : null;
+      const remarks = row.remarks ? row.remarks.toString().trim() : null;
+
+      // ✅ dob rules
       let dob = row.dob ? new Date(row.dob) : null;
-      if (row.status === "Busy" && (!dob || Number.isNaN(dob.getTime()))) {
+      if (dob && Number.isNaN(dob.getTime())) dob = null;
+
+      if (status === "Visit Scheduled" && !dob) {
+        invalid.push({
+          row: i + 1,
+          mobile: nm.digits,
+          reason: "Visit Scheduled requires valid dob/date",
+        });
+        continue;
+      }
+
+      if (AUTO_24H_STATUSES.includes(status) && !dob) {
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(9, 0, 0, 0);
         dob = tomorrow;
       }
 
-      // if dob invalid -> null
-      if (dob && Number.isNaN(dob.getTime())) dob = null;
-
       valid.push({
         lead_id: new ObjectId().toHexString(),
         name: row.name || null,
         mobile: nm.digits,
         source: row.source || null,
-        status: row.status || null,
+        status: status || null,
         job_role: row.job_role || null,
         budget: row.budget || null,
         project: row.project || null,
-        remarks: row.remarks || null,
+        remarks: remarks || null,
         dob: dob,
         Assigned_to: assignedTo,
         createdAt: new Date(),
@@ -570,14 +745,15 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       });
     }
 
-    // 2) Find existing mobiles in DB (single query)
+    // Find existing mobiles
     const mobiles = valid.map((v) => v.mobile);
     const existingDocs = await leadsCol
       .find({ mobile: { $in: mobiles } }, { projection: { mobile: 1 } })
       .toArray();
-    const existingSet = new Set(existingDocs.map((d) => (d.mobile || "").toString()));
+    const existingSet = new Set(
+      existingDocs.map((d) => (d.mobile || "").toString())
+    );
 
-    // 3) Filter out already-existing leads
     const toInsert = [];
     const skippedExisting = [];
 
@@ -596,13 +772,21 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       });
     }
 
-    // 4) Insert all leads in one DB call (FAST)
-    // ordered:false -> continue inserting even if one fails
+    // ✅ Round Robin assign only for admin uploads, and only for rows still missing Assigned_to
+    if (isAdmin) {
+      await assignRoundRobinToLeads_(toInsert, settingsCol, usersCol);
+    }
+
     const insertRes = await leadsCol.insertMany(toInsert, { ordered: false });
 
-    // 5) Create follow-ups in bulk (only tracked statuses)
+    // ✅ Follow-ups bulk (UPDATED RULE):
+    // Create follow-up ONLY if status tracked AND remarks non-empty
     const followUps = toInsert
-      .filter((l) => l.status && TRACKED_STATUSES.includes(l.status))
+      .filter((l) => {
+        const st = (l.status || "").toString().trim();
+        const rm = (l.remarks || "").toString().trim();
+        return st && rm && TRACKED_STATUSES.includes(st);
+      })
       .map((l) => ({
         followup_id: l.lead_id,
         date: l.dob || new Date(),
@@ -628,7 +812,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       inserted: Object.keys(insertRes.insertedIds || {}).length,
       skippedExisting: skippedExisting.length,
       invalidCount: invalid.length,
-      invalid, // keep this so UI can show “row no + reason”
+      invalid,
     });
   } catch (err) {
     console.error("Bulk add error:", err);
@@ -638,13 +822,17 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
   }
 });
 
-
 /**
  * ✅ /edit-lead
  * - true partial update
  * - Busy: sets tomorrow 9AM if date not given
  * - 3 consecutive Busy/NR-SF/RNR => transfer to another user + verification_call=true
  * - when verification_call lead updated to non-Busy => return to original_assigned
+ *
+ * ✅ UPDATED:
+ * - Trim status/remarks when updating
+ * - AUTO_24H_STATUSES => tomorrow 9AM if dob missing AND status is in list
+ * - Visit Scheduled requires dob (reject if missing)
  */
 app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
   const leadId = req.params.id;
@@ -652,11 +840,20 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
   const update = {};
   if ("name" in req.body) update.name = req.body.name || null;
   if ("source" in req.body) update.source = req.body.source || null;
-  if ("status" in req.body) update.status = req.body.status || null;
+
+  if ("status" in req.body) {
+    const st = req.body.status ? req.body.status.toString().trim() : null;
+    update.status = st || null;
+  }
+
   if ("job_role" in req.body) update.job_role = req.body.job_role || null;
   if ("budget" in req.body) update.budget = req.body.budget || null;
   if ("project" in req.body) update.project = req.body.project || null;
-  if ("remarks" in req.body) update.remarks = req.body.remarks || null;
+
+  if ("remarks" in req.body) {
+    const rm = req.body.remarks ? req.body.remarks.toString().trim() : null;
+    update.remarks = rm || null;
+  }
 
   if ("dob" in req.body) update.dob = req.body.dob ? new Date(req.body.dob) : null;
 
@@ -682,10 +879,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     if (!existingLead) return res.status(404).json({ message: "Lead not found" });
 
     const newStatus = update.status;
-    const isTrackedStatus = !!(newStatus && TRACKED_STATUSES.includes(newStatus));
-
     const currentUser = (req.user?.user_name || "").toString().trim().toLowerCase();
-
     const responseData = { message: "Lead updated successfully" };
 
     // Helper: choose least-loaded user excluding current user
@@ -710,9 +904,29 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
       return userLeadCounts[0].user;
     }
 
-    // ✅ If status is Busy and date not provided => tomorrow 9AM
-    if (newStatus === "Busy") {
-      if (!("dob" in update) || !update.dob) {
+    // ✅ Normalize dob if provided
+    if ("dob" in update && update.dob && Number.isNaN(update.dob.getTime())) {
+      update.dob = null;
+    }
+
+    // ✅ Visit Scheduled requires date (dob)
+    if (newStatus === "Visit Scheduled") {
+      const nextDob =
+        "dob" in update ? update.dob : existingLead.dob ? new Date(existingLead.dob) : null;
+
+      if (!nextDob) {
+        return res.status(400).json({
+          message: "Visit Scheduled requires a valid dob/date",
+        });
+      }
+    }
+
+    // ✅ AUTO_24H_STATUSES => tomorrow 9AM if dob missing
+    if (newStatus && AUTO_24H_STATUSES.includes(newStatus)) {
+      const nextDob =
+        "dob" in update ? update.dob : existingLead.dob ? new Date(existingLead.dob) : null;
+
+      if (!nextDob) {
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(9, 0, 0, 0);
@@ -741,8 +955,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
       (newStatus === "Busy" || newStatus === "NR/SF" || newStatus === "RNR");
 
     if (shouldTransferCheck) {
-      // Important: "3 days" behavior is implemented as "3 consecutive follow-ups with same status"
-      // because you are saving follow-up entries per update, and sorting by date.
+      // "3 days" behavior implemented as "3 consecutive follow-ups with same status"
       const history = await followUpsCol
         .find({ followup_id: existingLead.lead_id, status: newStatus })
         .sort({ date: -1 })
@@ -773,9 +986,12 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const nextStatus = nextLead.status || null;
 
     const isTracked = !!(nextStatus && TRACKED_STATUSES.includes(nextStatus));
+    const hasRemarks = !!((nextLead.remarks || "").toString().trim());
 
-    // Follow-up sync:
-    if (!isTracked) {
+    // ✅ Follow-up sync (UPDATED RULE):
+    // - If NOT tracked OR NO remarks => remove follow-up
+    // - Else upsert follow-up
+    if (!isTracked || !hasRemarks) {
       await followUpsCol.deleteOne({ followup_id: followupId });
     } else {
       const fuUpdate = {
@@ -792,7 +1008,10 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
 
       await followUpsCol.updateOne(
         { followup_id: followupId },
-        { $set: fuUpdate, $setOnInsert: { followup_id: followupId, createdAt: new Date() } },
+        {
+          $set: fuUpdate,
+          $setOnInsert: { followup_id: followupId, createdAt: new Date() },
+        },
         { upsert: true }
       );
     }
@@ -822,7 +1041,7 @@ app.delete("/delete-lead/:id", auth(["admin"]), async (req, res) => {
 
     return res.status(200).json({ message: "Deleted successfully" });
   } catch (err) {
-    console.error("Delete lead error", err);
+    console.error("Delete lead error:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     if (clientObj) await clientObj.close();
@@ -859,7 +1078,7 @@ app.post("/statuslist", auth(["admin"]), async (req, res) => {
     await database.collection("status").insertOne(status);
     return res.status(201).send();
   } catch (err) {
-    console.error("Status update error", err);
+    console.error("Status update error:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     if (clientObj) await clientObj.close();
@@ -949,7 +1168,7 @@ app.put("/edit-follow_up/:id", auth(["admin", "user"]), async (req, res) => {
 
     return res.status(200).json({ message: "Follow-up updated successfully" });
   } catch (err) {
-    console.error("Update follow-up error", err);
+    console.error("Update follow-up error:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     if (clientObj) await clientObj.close();
@@ -978,7 +1197,9 @@ app.get("/follow-up/:id", auth(["admin", "user"]), async (req, res) => {
   try {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
-    const doc = await database.collection("follow-ups").findOne({ followup_id: id });
+    const doc = await database
+      .collection("follow-ups")
+      .findOne({ followup_id: id });
 
     if (!doc) return res.status(404).json({ message: "Follow-up not found" });
     return res.status(200).json(doc);
@@ -998,7 +1219,9 @@ app.delete("/delete-follow_up/:id", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const result = await database.collection("follow-ups").deleteOne({ followup_id: id });
+    const result = await database
+      .collection("follow-ups")
+      .deleteOne({ followup_id: id });
     if (result.deletedCount === 0) {
       return res.status(404).json({ message: "Follow-up not found" });
     }
@@ -1021,7 +1244,9 @@ app.post("/site_visit", auth(["admin", "user"]), async (req, res) => {
     visit_id: req.body.visit_id,
     name: req.body.name,
     mobile: req.body.mobile ? parseInt(req.body.mobile, 10) : null,
-    site_visit_date: req.body.site_visit_date ? new Date(req.body.site_visit_date) : null,
+    site_visit_date: req.body.site_visit_date
+      ? new Date(req.body.site_visit_date)
+      : null,
     Assigned_to: req.body.Assigned_to,
     created_by: req.body.created_by,
   };
@@ -1031,7 +1256,9 @@ app.post("/site_visit", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
     await database.collection("site_visit").insertOne(visit);
-    return res.status(201).json({ message: "Site visit added successfully" });
+    return res
+      .status(201)
+      .json({ message: "Site visit added successfully" });
   } catch (err) {
     console.error("Site visit add error", err);
     return res.status(500).json({ message: "Internal Server Error" });
@@ -1047,7 +1274,9 @@ app.put("/edit_site_visit/:id", auth(["admin", "user"]), async (req, res) => {
     visit_id: req.body.visit_id,
     name: req.body.name,
     mobile: req.body.mobile ? parseInt(req.body.mobile, 10) : null,
-    site_visit_date: req.body.site_visit_date ? new Date(req.body.site_visit_date) : null,
+    site_visit_date: req.body.site_visit_date
+      ? new Date(req.body.site_visit_date)
+      : null,
     Assigned_to: req.body.Assigned_to,
     created_by: req.body.created_by,
   };
@@ -1057,7 +1286,9 @@ app.put("/edit_site_visit/:id", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    await database.collection("site_visit").updateOne({ visit_id: id }, { $set: visit });
+    await database
+      .collection("site_visit")
+      .updateOne({ visit_id: id }, { $set: visit });
     return res.status(200).json({ message: "Site visit updated" });
   } catch (err) {
     console.error("Site visit update error", err);
@@ -1090,7 +1321,9 @@ app.get("/site_visits/:id", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const doc = await database.collection("site_visit").findOne({ visit_id: id });
+    const doc = await database
+      .collection("site_visit")
+      .findOne({ visit_id: id });
     if (!doc) return res.status(404).json({ message: "Site visit not found" });
 
     return res.status(200).json(doc);
@@ -1110,7 +1343,9 @@ app.delete("/delete/site_visit/:id", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const result = await database.collection("site_visit").deleteOne({ visit_id: id });
+    const result = await database
+      .collection("site_visit")
+      .deleteOne({ visit_id: id });
     if (result.deletedCount === 0) {
       return res.status(404).json({ message: "Site visit not found" });
     }
@@ -1153,11 +1388,6 @@ app.use((req, res) => {
   });
 });
 
-/**
- * ✅ IMPORTANT FOR VERCEL:
- * - Do NOT always listen in serverless.
- * - Export app and only listen when running locally.
- */
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server running on http://127.0.0.1:${PORT}`);

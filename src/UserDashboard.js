@@ -14,23 +14,40 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 
-/* ===================== CONSTANTS ===================== */
-
-// ✅ Source dropdown options (edit this list anytime)
+// Source dropdown options (edit this list anytime)
 const SOURCE_OPTIONS = [
-  "Meta Ads",
   "Google Ads",
-  "Website",
+  "Meta Ads",
   "WhatsApp",
+  "Facebook",
+  "Instagram",
+  "Website",
   "Walk-in",
   "Referral",
-  "Channel Partner",
-  "Phone Call",
-  "Other",
+  "99acres",
+  "Shilpa K Leads",
+  "Roopa Leads",
+  "Shilpa G Leads",
+  "Sreyash Leads",
+];
+
+const PROJECT_OPTIONS = [
+  "Northern Lights",
+  "Gk hill view",
+  "Novera farmland",
+  "Konig villa homes",
+  "Sattva lumino",
+  "Godrej woods",
+  "Ranka ankura",
+  "Vajram vivera",
+  "SLV golden towers",
 ];
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
-const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
+
+// ✅ Change: RNR should NOT lock date in edit (and even in add, your request is mainly edit)
+// We'll lock only NR/SF and Busy.
+const HARD_LOCK_STATUSES = ["NR/SF", "Busy"];
 
 const DASHBOARD_FOLLOWUP_STATUSES = [
   "Follow Up",
@@ -48,7 +65,7 @@ const DASHBOARD_FOLLOWUP_STATUSES = [
   "Closed",
 ];
 
-/* ===================== HELPERS ===================== */
+/* helpers */
 const toLocalInputValue = (date) => {
   if (!date) return "";
   const d = date instanceof Date ? date : new Date(date);
@@ -66,6 +83,30 @@ const getNowPlus24Hours = () => {
   const d = new Date();
   d.setHours(d.getHours() + 24);
   return toLocalInputValue(d);
+};
+
+// ✅ NEW: if user selects only date (or time not selected), set time to 09:00 AM
+const ensureTime0900 = (val) => {
+  if (!val) return "";
+
+  const s = String(val);
+
+  // If user somehow provides only date (YYYY-MM-DD)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return `${s}T09:00`;
+  }
+
+  // If user provides incomplete datetime like "YYYY-MM-DDT"
+  if (/^\d{4}-\d{2}-\d{2}T$/.test(s)) {
+    return `${s}09:00`;
+  }
+
+  // If datetime-local returns midnight by default (00:00), treat as "time not selected"
+  if (/^\d{4}-\d{2}-\d{2}T00:00$/.test(s)) {
+    return s.replace("T00:00", "T09:00");
+  }
+
+  return s;
 };
 
 const normalizeAndValidateMobile = (raw) => {
@@ -100,6 +141,15 @@ const normalizeAndValidateMobile = (raw) => {
   }
 
   return { ok: true, error: null, normalized: digits };
+};
+
+// ✅ Global/mobile matching helpers
+const normalizeDigits = (v) => String(v || "").replace(/\D/g, "");
+const mobileMatches = (mobileValue, query) => {
+  const m = normalizeDigits(mobileValue);
+  const q = normalizeDigits(query);
+  if (!q) return true;
+  return m.includes(q);
 };
 
 export function UserDashboard() {
@@ -149,6 +199,10 @@ export function UserDashboard() {
 
   // ✅ Toggle for showing previous remarks (only for the currently edited row)
   const [showPrevRemarks, setShowPrevRemarks] = useState(false);
+
+  // ✅ NEW: Global search input (header) + modal filter input
+  const [globalMobileSearch, setGlobalMobileSearch] = useState("");
+  const [modalMobileSearch, setModalMobileSearch] = useState("");
 
   const role = localStorage.getItem("role");
   const username = (localStorage.getItem("username") || "")
@@ -325,8 +379,99 @@ export function UserDashboard() {
   const todayUserGroups = buildUserStatusGroups(followUpAlerts.today);
   const tomorrowUserGroups = buildUserStatusGroups(followUpAlerts.tomorrow);
 
+  // ✅ Build combined rows for a mobile query (checks BOTH leads + followups)
+  const buildMobileSearchRows = (query) => {
+    const q = (query || "").trim();
+    if (!q) return [];
+
+    // latest followup per lead
+    const latestFUByLead = {};
+    (followUpsData || []).forEach((fu) => {
+      const key = fu.followup_id || fu.lead_id || fu._id;
+      if (!key) return;
+      const t = fu.date ? new Date(fu.date).getTime() : 0;
+      const prev = latestFUByLead[key];
+      const pt = prev?.date ? new Date(prev.date).getTime() : 0;
+      if (!prev || t >= pt) latestFUByLead[key] = fu;
+    });
+
+    const combined = [];
+
+    // 1) leads (authoritative)
+    (leadsData || []).forEach((l) => {
+      const leadKey = l.lead_id || l._id;
+      const fu = leadKey ? latestFUByLead[leadKey] : null;
+
+      combined.push({
+        id: leadKey,
+        leadKey,
+        name: l.name || "",
+        mobile: l.mobile || "",
+        status: l.status || (fu?.status || ""),
+        source: l.source || (fu?.source || ""),
+        date: l.dob || fu?.date || null,
+        remarks: l.remarks || fu?.remarks || "",
+        Assigned_to: l.Assigned_to || "",
+        project: l.project || fu?.project || "",
+        verification_call: !!l.verification_call,
+      });
+    });
+
+    // 2) followups that don’t have a lead row (fallback)
+    Object.entries(latestFUByLead).forEach(([key, fu]) => {
+      const existsInLeads = (leadsData || []).some((l) => (l.lead_id || l._id) === key);
+      if (existsInLeads) return;
+
+      combined.push({
+        id: fu.followup_id || fu._id,
+        leadKey: key, // try edit by this key
+        name: fu.name || "",
+        mobile: fu.mobile || "",
+        status: fu.status || "",
+        source: fu.source || "",
+        date: fu.date || null,
+        remarks: fu.remarks || "",
+        Assigned_to: fu.Assigned_to || "",
+        project: fu.project || "",
+        verification_call: false,
+      });
+    });
+
+    return combined.filter((row) => mobileMatches(row.mobile, q));
+  };
+
+  // ✅ Open mobile search modal
+  const openMobileSearchModal = (searchValue) => {
+    const q = (searchValue || "").trim();
+    if (!q) {
+      toast.error("Enter mobile number to search");
+      return;
+    }
+
+    const results = buildMobileSearchRows(q);
+
+    setModalContext({ kind: "mobileSearch", query: q });
+    setModalTitle(`Mobile Search: ${q}`);
+    setModalRows(results);
+    setModalOpen(true);
+
+    setEditingRowId(null);
+    setEditRowData(null);
+    setShowPrevRemarks(false);
+    setModalMobileSearch(q);
+  };
+
   const rebuildModalFromContext = () => {
     if (!modalOpen || !modalContext) return;
+
+    // ✅ NEW: rebuild mobile search modal after refresh
+    if (modalContext.kind === "mobileSearch") {
+      const q = modalContext.query || "";
+      setModalTitle(`Mobile Search: ${q}`);
+      setModalRows(buildMobileSearchRows(q));
+      setModalMobileSearch(q);
+      return;
+    }
 
     if (modalContext.kind === "summary") {
       const type = modalContext.type;
@@ -562,6 +707,7 @@ export function UserDashboard() {
     setEditingRowId(null);
     setEditRowData(null);
     setShowPrevRemarks(false);
+    setModalMobileSearch("");
   };
 
   const openGroupModal = (bucketLabel, assignedTo, status, items) => {
@@ -596,6 +742,7 @@ export function UserDashboard() {
     setEditingRowId(null);
     setEditRowData(null);
     setShowPrevRemarks(false);
+    setModalMobileSearch("");
   };
 
   const closeModal = () => {
@@ -606,6 +753,7 @@ export function UserDashboard() {
     setEditRowData(null);
     setModalContext(null);
     setShowPrevRemarks(false);
+    setModalMobileSearch("");
   };
 
   const openAddLeadModal = () => {
@@ -647,7 +795,9 @@ export function UserDashboard() {
         }
       } else if (field === "dob") {
         if (HARD_LOCK_STATUSES.includes(prev.status)) return prev;
-        updated.dob = value || "";
+
+        // ✅ Ensure time = 09:00 if user selected only date / time not selected
+        updated.dob = ensureTime0900(value || "");
       } else {
         updated[field] = value;
       }
@@ -680,6 +830,9 @@ export function UserDashboard() {
     try {
       let statusToSave = newLead.status || "";
       let dobToSave = newLead.dob || "";
+
+      // ✅ Ensure 09:00 if date-only / time not selected
+      dobToSave = ensureTime0900(dobToSave);
 
       if (statusToSave === "Visit Scheduled" && (!dobToSave || dobToSave === "")) {
         toast.error("Please select visit date & time before saving lead.");
@@ -717,7 +870,7 @@ export function UserDashboard() {
     }
   };
 
-  // ✅ When clicking Edit: clear textarea + keep ALL previous remarks separately
+  // When clicking Edit: clear textarea + keep ALL previous remarks separately
   const startEditRow = (row) => {
     const rowId = row.leadKey || row.id;
     setEditingRowId(rowId);
@@ -728,8 +881,8 @@ export function UserDashboard() {
       leadKey: rowId,
       date: row.date ? toLocalInputValue(row.date) : "",
       source: row.source || "",
-      prevRemarks: row.remarks || "", // ✅ this should contain ALL previous remarks (as stored in DB)
-      remarks: "", // ✅ textarea must start empty
+      prevRemarks: row.remarks || "", // this should contain ALL previous remarks (as stored in DB)
+      remarks: "", // textarea must start empty
     });
   };
 
@@ -744,12 +897,18 @@ export function UserDashboard() {
       const next = { ...prev, [field]: value };
 
       if (field === "status") {
+        // ✅ if date empty and status requires auto +24h, set it
         if (AUTO_24H_STATUSES.includes(value) && (!prev.date || prev.date === "")) {
           next.date = getNowPlus24Hours();
         }
       }
 
       if (field === "date") {
+        // ✅ Ensure time = 09:00 if only date / time not selected
+        const fixed = ensureTime0900(value);
+        next.date = fixed;
+
+        // ✅ Change: RNR must be editable (date should not be blocked)
         if (HARD_LOCK_STATUSES.includes(prev.status)) return prev;
       }
 
@@ -763,17 +922,20 @@ export function UserDashboard() {
     try {
       const newRemark = (editRowData.remarks || "").trim();
 
-      // ✅ Append new remark to previous remarks so history is preserved
+      // Append new remark to previous remarks so history is preserved
       const combinedRemarks = [editRowData.prevRemarks, newRemark]
         .filter(Boolean)
         .join("\n");
+
+      // ✅ Ensure time = 09:00 if date-only / time not selected (edit save)
+      const finalDob = ensureTime0900(editRowData.date || "");
 
       const payload = {
         status: editRowData.status || null,
         remarks: combinedRemarks ? combinedRemarks : null,
         project: editRowData.project || null,
         source: editRowData.source || null,
-        dob: editRowData.date || null,
+        dob: finalDob || null,
         Assigned_to: editRowData.Assigned_to || null,
       };
 
@@ -888,6 +1050,36 @@ export function UserDashboard() {
                           <strong>bookings</strong> at a glance.
                         </div>
                       </div>
+                    </div>
+
+                    {/* ✅ Global Mobile Search */}
+                    <div className="d-flex gap-2 align-items-center flex-wrap mt-2">
+                      <input
+                        className="form-control form-control-sm"
+                        style={{ width: 260 }}
+                        placeholder="Search mobile (leads + followups)..."
+                        value={globalMobileSearch}
+                        onChange={(e) => setGlobalMobileSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") openMobileSearchModal(globalMobileSearch);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-light btn-sm"
+                        onClick={() => openMobileSearchModal(globalMobileSearch)}
+                      >
+                        Search
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-light btn-sm"
+                        onClick={() => {
+                          setGlobalMobileSearch("");
+                        }}
+                      >
+                        Clear
+                      </button>
                     </div>
                   </div>
 
@@ -1305,6 +1497,22 @@ export function UserDashboard() {
                       padding: "0.75rem",
                     }}
                   >
+                    {/* mobile filter inside modal */}
+                    <div className="d-flex gap-2 align-items-center mb-2">
+                      <input
+                        className="form-control form-control-sm"
+                        placeholder="Filter mobile inside results..."
+                        value={modalMobileSearch}
+                        onChange={(e) => setModalMobileSearch(e.target.value)}
+                      />
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => setModalMobileSearch("")}
+                      >
+                        Clear
+                      </button>
+                    </div>
+
                     {modalRows.length === 0 ? (
                       <div className="p-4 text-center text-muted small">No records available.</div>
                     ) : (
@@ -1325,217 +1533,224 @@ export function UserDashboard() {
                           </thead>
 
                           <tbody>
-                            {modalRows.map((row, idx) => {
-                              const rowKey = row.leadKey || row.id;
-                              const isEditing =
-                                editingRowId && editingRowId === rowKey && editRowData;
+                            {modalRows
+                              .filter((r) => mobileMatches(r.mobile, modalMobileSearch))
+                              .map((row, idx) => {
+                                const rowKey = row.leadKey || row.id;
+                                const isEditing =
+                                  editingRowId && editingRowId === rowKey && editRowData;
 
-                              return (
-                                <tr
-                                  key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
-                                  style={
-                                    row.verification_call
-                                      ? {
-                                          backgroundColor: "#fff7ed",
-                                          borderLeft: "4px solid #f97316",
-                                        }
-                                      : undefined
-                                  }
-                                >
-                                  <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
-                                  <td>{row.name || "—"}</td>
-
-                                  <td>
-                                    {isEditing ? (
-                                      <input
-                                        type="text"
-                                        className="form-control form-control-sm"
-                                        list="source-options"
-                                        value={editRowData.source || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("source", e.target.value)
-                                        }
-                                        placeholder="Select or type source"
-                                      />
-                                    ) : (
-                                      <span className="small text-dark">{row.source || "—"}</span>
-                                    )}
-                                  </td>
-
-                                  <td>
-                                    {isEditing ? (
-                                      <input
-                                        type="text"
-                                        className="form-control form-control-sm"
-                                        value={editRowData.project || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("project", e.target.value)
-                                        }
-                                      />
-                                    ) : (
-                                      row.project || "—"
-                                    )}
-                                  </td>
-
-                                  <td>
-                                    {isEditing ? (
-                                      <select
-                                        className="form-select form-select-sm"
-                                        value={editRowData.status || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("status", e.target.value)
-                                        }
-                                      >
-                                        <option value="">Select status</option>
-                                        <option value="Details_shared">Details_shared</option>
-                                        <option value="NR/SF">NR/SF</option>
-                                        <option value="Visit Scheduled">Visit Scheduled</option>
-                                        <option value="RNR">RNR</option>
-                                        <option value="Site Visited">Site Visited</option>
-                                        <option value="Booked">Booked</option>
-                                        <option value="Invalid">Invalid</option>
-                                        <option value="Not Interested">Not Interested</option>
-                                        <option value="Location Issue">Location Issue</option>
-                                        <option value="CP">CP</option>
-                                        <option value="Budget Issue">Budget Issue</option>
-                                        <option value="Visit Postponed">Visit Postponed</option>
-                                        <option value="Closed">Closed</option>
-                                        <option value="Busy">Busy</option>
-                                      </select>
-                                    ) : (
-                                      <div className="d-flex flex-column gap-1">
-                                        <span className="small text-dark">{row.status || "—"}</span>
-                                        {row.verification_call && (
-                                          <span
-                                            className="badge rounded-pill"
-                                            style={{
-                                              width: "fit-content",
-                                              backgroundColor: "#f97316",
-                                              color: "#fff",
-                                              fontSize: "0.65rem",
-                                            }}
-                                          >
-                                            Verification Call
-                                          </span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </td>
-
-                                  {/* ✅ Remarks: textarea empty + small "Remarks" button to view previous remarks */}
-                                  <td>
-                                    {isEditing ? (
-                                      <div className="d-flex flex-column gap-1">
-                                        <textarea
-                                          rows={2}
-                                          className="form-control form-control-sm"
-                                          value={editRowData.remarks || ""}
-                                          onChange={(e) =>
-                                            handleEditRowChange("remarks", e.target.value)
+                                return (
+                                  <tr
+                                    key={`row-${idx}-${row.id || row.mobile || "no-id"}`}
+                                    style={
+                                      row.verification_call
+                                        ? {
+                                            backgroundColor: "#fff7ed",
+                                            borderLeft: "4px solid #f97316",
                                           }
-                                          placeholder="Type new remark..."
-                                        />
+                                        : undefined
+                                    }
+                                  >
+                                    <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
+                                    <td>{row.name || "—"}</td>
 
-                                        <div className="d-flex justify-content-end">
+                                    <td>
+                                      {isEditing ? (
+                                        <input
+                                          type="text"
+                                          className="form-control form-control-sm"
+                                          list="source-options"
+                                          value={editRowData.source || ""}
+                                          onChange={(e) =>
+                                            handleEditRowChange("source", e.target.value)
+                                          }
+                                          placeholder="Select or type source"
+                                        />
+                                      ) : (
+                                        <span className="small text-dark">{row.source || "—"}</span>
+                                      )}
+                                    </td>
+
+                                    <td>
+                                      {isEditing ? (
+                                        <select
+                                          className="form-select form-select-sm"
+                                          value={editRowData.project || ""}
+                                          onChange={(e) =>
+                                            handleEditRowChange("project", e.target.value)
+                                          }
+                                        >
+                                          <option value="">Select project</option>
+                                          {PROJECT_OPTIONS.map((p) => (
+                                            <option key={p} value={p}>
+                                              {p}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        row.project || "—"
+                                      )}
+                                    </td>
+
+                                    <td>
+                                      {isEditing ? (
+                                        <select
+                                          className="form-select form-select-sm"
+                                          value={editRowData.status || ""}
+                                          onChange={(e) =>
+                                            handleEditRowChange("status", e.target.value)
+                                          }
+                                        >
+                                          <option value="">Select status</option>
+                                          <option value="Details_shared">Details_shared</option>
+                                          <option value="NR/SF">NR/SF</option>
+                                          <option value="Visit Scheduled">Visit Scheduled</option>
+                                          <option value="RNR">RNR</option>
+                                          <option value="Site Visited">Site Visited</option>
+                                          <option value="Booked">Booked</option>
+                                          <option value="Invalid">Invalid</option>
+                                          <option value="Not Interested">Not Interested</option>
+                                          <option value="Location Issue">Location Issue</option>
+                                          <option value="CP">CP</option>
+                                          <option value="Budget Issue">Budget Issue</option>
+                                          <option value="Visit Postponed">Visit Postponed</option>
+                                          <option value="Closed">Closed</option>
+                                          <option value="Busy">Busy</option>
+                                        </select>
+                                      ) : (
+                                        <div className="d-flex flex-column gap-1">
+                                          <span className="small text-dark">{row.status || "—"}</span>
+                                          {row.verification_call && (
+                                            <span
+                                              className="badge rounded-pill"
+                                              style={{
+                                                width: "fit-content",
+                                                backgroundColor: "#f97316",
+                                                color: "#fff",
+                                                fontSize: "0.65rem",
+                                              }}
+                                            >
+                                              Verification Call
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Remarks */}
+                                    <td>
+                                      {isEditing ? (
+                                        <div className="d-flex flex-column gap-1">
+                                          <textarea
+                                            rows={2}
+                                            className="form-control form-control-sm"
+                                            value={editRowData.remarks || ""}
+                                            onChange={(e) =>
+                                              handleEditRowChange("remarks", e.target.value)
+                                            }
+                                            placeholder="Type new remark..."
+                                          />
+
+                                          <div className="d-flex justify-content-end">
+                                            <button
+                                              type="button"
+                                              className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
+                                              onClick={() => setShowPrevRemarks((v) => !v)}
+                                              disabled={!editRowData?.prevRemarks}
+                                              title="Show previous remarks"
+                                            >
+                                              <MessageSquareText size={14} />
+                                              <span>Remarks</span>
+                                              {showPrevRemarks ? (
+                                                <ChevronUp size={14} />
+                                              ) : (
+                                                <ChevronDown size={14} />
+                                              )}
+                                            </button>
+                                          </div>
+
+                                          {showPrevRemarks && (
+                                            <div
+                                              className="small text-muted"
+                                              style={{
+                                                background: "#f8fafc",
+                                                border: "1px solid #e2e8f0",
+                                                borderRadius: 8,
+                                                padding: "8px 10px",
+                                                whiteSpace: "pre-wrap",
+                                              }}
+                                            >
+                                              <div className="fw-semibold text-dark mb-1">
+                                                Previous remarks
+                                              </div>
+                                              {editRowData?.prevRemarks ? (
+                                                editRowData.prevRemarks
+                                              ) : (
+                                                <span className="text-muted">No previous remarks</span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="small text-muted">{row.remarks || "—"}</span>
+                                      )}
+                                    </td>
+
+                                    <td>
+                                      {isEditing ? (
+                                        <input
+                                          type="datetime-local"
+                                          className="form-control form-control-sm"
+                                          value={editRowData.date || ""}
+                                          onChange={(e) => handleEditRowChange("date", e.target.value)}
+                                          // ✅ RNR is now editable (only NR/SF and Busy lock)
+                                          disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
+                                        />
+                                      ) : (
+                                        <span className="small fw-semibold">
+                                          {row.date ? formatDateTime(row.date) : "—"}
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    <td>
+                                      <span className="small text-dark">
+                                        {row.Assigned_to || "—"}
+                                      </span>
+                                    </td>
+
+                                    <td>
+                                      {isEditing ? (
+                                        <div className="d-flex flex-column gap-1">
                                           <button
                                             type="button"
-                                            className="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1"
-                                            onClick={() => setShowPrevRemarks((v) => !v)}
-                                            disabled={!editRowData?.prevRemarks}
-                                            title="Show previous remarks"
+                                            className="btn btn-sm btn-success"
+                                            onClick={handleSaveEditRow}
                                           >
-                                            <MessageSquareText size={14} />
-                                            <span>Remarks</span>
-                                            {showPrevRemarks ? (
-                                              <ChevronUp size={14} />
-                                            ) : (
-                                              <ChevronDown size={14} />
-                                            )}
+                                            Save
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm btn-outline-secondary"
+                                            onClick={cancelEditRow}
+                                          >
+                                            Cancel
                                           </button>
                                         </div>
-
-                                        {showPrevRemarks && (
-                                          <div
-                                            className="small text-muted"
-                                            style={{
-                                              background: "#f8fafc",
-                                              border: "1px solid #e2e8f0",
-                                              borderRadius: 8,
-                                              padding: "8px 10px",
-                                              whiteSpace: "pre-wrap",
-                                            }}
-                                          >
-                                            <div className="fw-semibold text-dark mb-1">
-                                              Previous remarks
-                                            </div>
-                                            {editRowData?.prevRemarks ? (
-                                              editRowData.prevRemarks
-                                            ) : (
-                                              <span className="text-muted">No previous remarks</span>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="small text-muted">{row.remarks || "—"}</span>
-                                    )}
-                                  </td>
-
-                                  <td>
-                                    {isEditing ? (
-                                      <input
-                                        type="datetime-local"
-                                        className="form-control form-control-sm"
-                                        value={editRowData.date || ""}
-                                        onChange={(e) =>
-                                          handleEditRowChange("date", e.target.value)
-                                        }
-                                        disabled={HARD_LOCK_STATUSES.includes(editRowData.status)}
-                                      />
-                                    ) : (
-                                      <span className="small fw-semibold">
-                                        {row.date ? formatDateTime(row.date) : "—"}
-                                      </span>
-                                    )}
-                                  </td>
-
-                                  <td>
-                                    <span className="small text-dark">
-                                      {row.Assigned_to || "—"}
-                                    </span>
-                                  </td>
-
-                                  <td>
-                                    {isEditing ? (
-                                      <div className="d-flex flex-column gap-1">
+                                      ) : (
                                         <button
                                           type="button"
-                                          className="btn btn-sm btn-success"
-                                          onClick={handleSaveEditRow}
+                                          className="btn btn-sm btn-outline-primary"
+                                          onClick={() => startEditRow(row)}
                                         >
-                                          Save
+                                          Edit
                                         </button>
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm btn-outline-secondary"
-                                          onClick={cancelEditRow}
-                                        >
-                                          Cancel
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        className="btn btn-sm btn-outline-primary"
-                                        onClick={() => startEditRow(row)}
-                                      >
-                                        Edit
-                                      </button>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                           </tbody>
                         </table>
                       </div>
@@ -1544,7 +1759,11 @@ export function UserDashboard() {
 
                   <div className="modal-footer bg-light border-top">
                     <div className="me-auto small text-muted">
-                      Showing <strong>{modalRows.length}</strong> record(s)
+                      Showing{" "}
+                      <strong>
+                        {modalRows.filter((r) => mobileMatches(r.mobile, modalMobileSearch)).length}
+                      </strong>{" "}
+                      record(s)
                     </div>
                     <button
                       type="button"
@@ -1638,13 +1857,18 @@ export function UserDashboard() {
 
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Project</label>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        value={newLead.project}
+                      <select
+                        className="form-select form-select-sm"
+                        value={newLead.project || ""}
                         onChange={(e) => handleNewLeadChange("project", e.target.value)}
-                        placeholder="Project name / code"
-                      />
+                      >
+                        <option value="">Select project</option>
+                        {PROJECT_OPTIONS.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div className="col-12 col-sm-6">

@@ -35,6 +35,35 @@ const FOLLOW_UP_STATUSES = [
   "Busy",
 ];
 
+// Source dropdown options
+const SOURCE_OPTIONS = [
+  "Google Ads",
+  "Meta Ads",
+  "WhatsApp",
+  "Facebook",
+  "Instagram",
+  "Website",
+  "Walk-in",
+  "Referral",
+  "99acres",
+  "Shilpa K Leads",
+  "Roopa Leads",
+  "Shilpa G Leads",
+  "Sreyash Leads",
+];
+
+const PROJECT_OPTIONS = [
+  "Northern Lights",
+  "Gk hill view",
+  "Novera farmland",
+  "Konig villa homes",
+  "Sattva lumino",
+  "Godrej woods",
+  "Ranka ankura",
+  "Vajram vivera",
+  "SLV golden towers",
+];
+
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
 const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
 
@@ -1320,18 +1349,20 @@ export function StatusDashboard() {
                     <label className="form-label small text-muted mt-3">
                       Project
                     </label>
-                    <input
-                      type="text"
-                      className="form-control form-control-sm"
+                    <select
+                      className="form-select form-select-sm"
                       value={currentRow.project || ""}
                       onChange={(e) =>
-                        handleFieldChange(
-                          currentRow.lead_id,
-                          "project",
-                          e.target.value
-                        )
+                        handleFieldChange(currentRow.lead_id, "project", e.target.value)
                       }
-                    />
+                    >
+                      <option value="">Select project</option>
+                      {PROJECT_OPTIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
                     <div className="form-text small text-muted">
                       You can update the project even after the lead is saved.
                     </div>

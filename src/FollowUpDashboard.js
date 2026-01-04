@@ -19,7 +19,18 @@ const TRACKED_STATUSES = [
   "Busy",
 ];
 
-const PROJECT_OPTIONS = ["Northern Lights", "Gruhakalpa", "Nandi Hill View"];
+const PROJECT_OPTIONS = [
+  "Northern Lights",
+  "Gk hill view",
+  "Novara farmland",
+  "Konig villa homes",
+  "Sattva lumino",
+  "Godrej woods",
+  "Ranka ankura",
+  "Vajram vivera",
+  "SLV golden towers",
+];
+
 
 function formatDateTime(value) {
   if (!value) return "";
