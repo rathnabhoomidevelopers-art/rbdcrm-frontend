@@ -163,9 +163,16 @@ export function UserDashboard() {
     updatedToday: 0,
   });
 
-  // ✅ NEW: Admin breakdown (leads added today grouped by createdBy)
+  // ✅ Admin breakdown (added + updated grouped by user)
   const [adminBreakdown, setAdminBreakdown] = useState({
     addedTodayByUser: {},
+    updatedTodayByUser: {},
+  });
+
+  // ✅ Keep these for "details" drill-down
+  const [adminTodayLists, setAdminTodayLists] = useState({
+    addedTodayLeads: [],
+    updatedTodayLeads: [],
   });
 
   const [followUpAlerts, setFollowUpAlerts] = useState({
@@ -222,13 +229,34 @@ export function UserDashboard() {
     return d.toLocaleString();
   };
 
+  // ✅ helper: build rows from leads list
+  const mapLeadsToRows = (arr) =>
+    (arr || []).map((l) => ({
+      id: l.lead_id || l._id,
+      leadKey: l.lead_id || l._id,
+      name: l.name || "",
+      mobile: l.mobile || "",
+      status: l.status || "",
+      source: l.source || "",
+      date: l.dob || null,
+      remarks: l.remarks || "",
+      Assigned_to: l.Assigned_to || "",
+      project: l.project || "",
+      verification_call: !!l.verification_call,
+
+      // ✅ admin fields
+      createdBy: l.createdBy || "",
+      updatedBy: l.updatedBy || "",
+      createdAt: l.createdAt || null,
+      updatedAt: l.updatedAt || null,
+    }));
+
   // ✅ Build rows for "Added Today (By User)" modal (admin only)
-  const buildAddedTodayByUserRows = (mapObj) => {
+  const buildCountByUserRows = (mapObj) => {
     const entries = Object.entries(mapObj || {});
-    // Sort desc by count
     entries.sort((a, b) => (b[1] || 0) - (a[1] || 0));
     return entries.map(([u, count]) => ({
-      id: `added-${u}`,
+      id: `u-${u}`,
       user: u,
       count,
     }));
@@ -238,7 +266,58 @@ export function UserDashboard() {
     if (role !== "admin") return;
     setModalContext({ kind: "adminAddedTodayByUser" });
     setModalTitle("Leads Added Today (By User)");
-    setModalRows(buildAddedTodayByUserRows(adminBreakdown.addedTodayByUser));
+    setModalRows(buildCountByUserRows(adminBreakdown.addedTodayByUser));
+    setModalOpen(true);
+
+    setEditingRowId(null);
+    setEditRowData(null);
+    setShowPrevRemarks(false);
+    setModalMobileSearch("");
+  };
+
+  const openUpdatedTodayByUserModal = () => {
+    if (role !== "admin") return;
+    setModalContext({ kind: "adminUpdatedTodayByUser" });
+    setModalTitle("Leads Updated Today (By User)");
+    setModalRows(buildCountByUserRows(adminBreakdown.updatedTodayByUser));
+    setModalOpen(true);
+
+    setEditingRowId(null);
+    setEditRowData(null);
+    setShowPrevRemarks(false);
+    setModalMobileSearch("");
+  };
+
+  // ✅ Admin: view leads added today by specific user (full lead details)
+  const openAddedTodayDetails = (user) => {
+    if (role !== "admin") return;
+    const u = (user || "").toString().trim().toLowerCase();
+    const list = (adminTodayLists.addedTodayLeads || []).filter(
+      (l) => (l.createdBy || "unknown").toString().trim().toLowerCase() === u
+    );
+
+    setModalContext({ kind: "adminAddedTodayByUserDetails", user: u });
+    setModalTitle(`Leads Added Today — ${u}`);
+    setModalRows(mapLeadsToRows(list));
+    setModalOpen(true);
+
+    setEditingRowId(null);
+    setEditRowData(null);
+    setShowPrevRemarks(false);
+    setModalMobileSearch("");
+  };
+
+  // ✅ Admin: view leads updated today by specific user (full lead details)
+  const openUpdatedTodayDetails = (user) => {
+    if (role !== "admin") return;
+    const u = (user || "").toString().trim().toLowerCase();
+    const list = (adminTodayLists.updatedTodayLeads || []).filter(
+      (l) => (l.updatedBy || "unknown").toString().trim().toLowerCase() === u
+    );
+
+    setModalContext({ kind: "adminUpdatedTodayByUserDetails", user: u });
+    setModalTitle(`Leads Updated Today — ${u}`);
+    setModalRows(mapLeadsToRows(list));
     setModalOpen(true);
 
     setEditingRowId(null);
@@ -252,10 +331,7 @@ export function UserDashboard() {
       if (showFullScreenLoader) setLoading(true);
       setRefreshing(!showFullScreenLoader);
 
-      const [leadsRes, followUpsRes] = await Promise.all([
-        api.get("/leads"),
-        api.get("/follow-ups"),
-      ]);
+      const [leadsRes, followUpsRes] = await Promise.all([api.get("/leads"), api.get("/follow-ups")]);
 
       let leads = leadsRes.data || [];
       let followUpsAll = followUpsRes.data || [];
@@ -266,9 +342,7 @@ export function UserDashboard() {
         );
 
         const myLeadIds = new Set(leads.map((l) => l.lead_id));
-        followUpsAll = followUpsAll.filter((fu) =>
-          myLeadIds.has(fu.followup_id || fu.lead_id)
-        );
+        followUpsAll = followUpsAll.filter((fu) => myLeadIds.has(fu.followup_id || fu.lead_id));
       }
 
       const totalLeads = leads.length;
@@ -311,19 +385,9 @@ export function UserDashboard() {
         return dt >= startOfToday && dt < endOfToday;
       };
 
-      // ✅ Added Today (for the logged-in user)
-      const addedToday = leads.filter(
-        (l) =>
-          isToday(l.createdAt) &&
-          (l.createdBy || "").toString().trim().toLowerCase() === username
-      ).length;
-
-      // ✅ Updated Today: exclude newly created leads + count only meaningful updates
-      const updatedToday = leads.filter((l) => {
+      // ✅ Shared "meaningful update" checker
+      const isMeaningfulUpdate = (l) => {
         if (!isToday(l.updatedAt)) return false;
-
-        const ub = (l.updatedBy || "").toString().trim().toLowerCase();
-        if (ub !== username) return false;
 
         const created = l.createdAt ? new Date(l.createdAt) : null;
         const updated = l.updatedAt ? new Date(l.updatedAt) : null;
@@ -349,22 +413,55 @@ export function UserDashboard() {
           (l.source && String(l.source).trim().length > 0) ||
           (l.dob && String(l.dob).trim().length > 0);
 
-        if (!hasMeaningfulData) return false;
+        return !!hasMeaningfulData;
+      };
 
-        return true;
-      }).length;
+      // ✅ Added Today / Updated Today counts
+      let addedToday = 0;
+      let updatedToday = 0;
 
-      // ✅ Admin breakdown: Leads added today grouped by createdBy
       if (role === "admin") {
-        const leadsAddedToday = leads.filter((l) => isToday(l.createdAt));
-        const addedTodayByUser = leadsAddedToday.reduce((acc, l) => {
+        // Admin wants total counts across all uploaded leads
+        const addedTodayLeads = leads.filter((l) => isToday(l.createdAt));
+        const updatedTodayLeads = leads.filter((l) => isMeaningfulUpdate(l));
+
+        addedToday = addedTodayLeads.length;
+        updatedToday = updatedTodayLeads.length;
+
+        // ✅ group by createdBy / updatedBy
+        const addedTodayByUser = addedTodayLeads.reduce((acc, l) => {
           const u = (l.createdBy || "unknown").toString().trim().toLowerCase();
           acc[u] = (acc[u] || 0) + 1;
           return acc;
         }, {});
-        setAdminBreakdown({ addedTodayByUser });
+
+        const updatedTodayByUser = updatedTodayLeads.reduce((acc, l) => {
+          const u = (l.updatedBy || "unknown").toString().trim().toLowerCase();
+          acc[u] = (acc[u] || 0) + 1;
+          return acc;
+        }, {});
+
+        setAdminBreakdown({ addedTodayByUser, updatedTodayByUser });
+        setAdminTodayLists({ addedTodayLeads, updatedTodayLeads });
       } else {
-        setAdminBreakdown({ addedTodayByUser: {} });
+        // User: show ONLY their own added/updated
+        addedToday = leads.filter(
+          (l) =>
+            isToday(l.createdAt) &&
+            (l.createdBy || "").toString().trim().toLowerCase() === username
+        ).length;
+
+        updatedToday = leads.filter((l) => {
+          if (!isToday(l.updatedAt)) return false;
+
+          const ub = (l.updatedBy || "").toString().trim().toLowerCase();
+          if (ub !== username) return false;
+
+          return isMeaningfulUpdate(l);
+        }).length;
+
+        setAdminBreakdown({ addedTodayByUser: {}, updatedTodayByUser: {} });
+        setAdminTodayLists({ addedTodayLeads: [], updatedTodayLeads: [] });
       }
 
       const startOfTomorrow = new Date(startOfToday);
@@ -566,7 +663,36 @@ export function UserDashboard() {
 
     if (modalContext.kind === "adminAddedTodayByUser") {
       setModalTitle("Leads Added Today (By User)");
-      setModalRows(buildAddedTodayByUserRows(adminBreakdown.addedTodayByUser));
+      setModalRows(buildCountByUserRows(adminBreakdown.addedTodayByUser));
+      setModalMobileSearch("");
+      return;
+    }
+
+    if (modalContext.kind === "adminUpdatedTodayByUser") {
+      setModalTitle("Leads Updated Today (By User)");
+      setModalRows(buildCountByUserRows(adminBreakdown.updatedTodayByUser));
+      setModalMobileSearch("");
+      return;
+    }
+
+    if (modalContext.kind === "adminAddedTodayByUserDetails") {
+      const u = (modalContext.user || "").toString().trim().toLowerCase();
+      const list = (adminTodayLists.addedTodayLeads || []).filter(
+        (l) => (l.createdBy || "unknown").toString().trim().toLowerCase() === u
+      );
+      setModalTitle(`Leads Added Today — ${u}`);
+      setModalRows(mapLeadsToRows(list));
+      setModalMobileSearch("");
+      return;
+    }
+
+    if (modalContext.kind === "adminUpdatedTodayByUserDetails") {
+      const u = (modalContext.user || "").toString().trim().toLowerCase();
+      const list = (adminTodayLists.updatedTodayLeads || []).filter(
+        (l) => (l.updatedBy || "unknown").toString().trim().toLowerCase() === u
+      );
+      setModalTitle(`Leads Updated Today — ${u}`);
+      setModalRows(mapLeadsToRows(list));
       setModalMobileSearch("");
       return;
     }
@@ -585,27 +711,7 @@ export function UserDashboard() {
 
       if (type === "leads") {
         setModalTitle("All Leads");
-        setModalRows(
-          (leadsData || []).map((l) => ({
-            id: l.lead_id || l._id,
-            leadKey: l.lead_id || l._id,
-            name: l.name || "",
-            mobile: l.mobile || "",
-            status: l.status || "",
-            source: l.source || "",
-            date: l.dob || null,
-            remarks: l.remarks || "",
-            Assigned_to: l.Assigned_to || "",
-            project: l.project || "",
-            verification_call: !!l.verification_call,
-
-            // ✅ admin fields
-            createdBy: l.createdBy || "",
-            updatedBy: l.updatedBy || "",
-            createdAt: l.createdAt || null,
-            updatedAt: l.updatedAt || null,
-          }))
-        );
+        setModalRows(mapLeadsToRows(leadsData || []));
         return;
       }
 
@@ -645,54 +751,14 @@ export function UserDashboard() {
       if (type === "sitevisits") {
         setModalTitle("Site Visit Leads");
         const filtered = (leadsData || []).filter((l) => l.status === "Site Visited");
-        setModalRows(
-          filtered.map((l) => ({
-            id: l.lead_id || l._id,
-            leadKey: l.lead_id || l._id,
-            name: l.name || "",
-            mobile: l.mobile || "",
-            status: l.status || "",
-            source: l.source || "",
-            date: l.dob || null,
-            remarks: l.remarks || "",
-            Assigned_to: l.Assigned_to || "",
-            project: l.project || "",
-            verification_call: !!l.verification_call,
-
-            // ✅ admin fields
-            createdBy: l.createdBy || "",
-            updatedBy: l.updatedBy || "",
-            createdAt: l.createdAt || null,
-            updatedAt: l.updatedAt || null,
-          }))
-        );
+        setModalRows(mapLeadsToRows(filtered));
         return;
       }
 
       if (type === "booked") {
         setModalTitle("Booked Leads");
         const filtered = (leadsData || []).filter((l) => l.status === "Booked");
-        setModalRows(
-          filtered.map((l) => ({
-            id: l.lead_id || l._id,
-            leadKey: l.lead_id || l._id,
-            name: l.name || "",
-            mobile: l.mobile || "",
-            status: l.status || "",
-            source: l.source || "",
-            date: l.dob || null,
-            remarks: l.remarks || "",
-            Assigned_to: l.Assigned_to || "",
-            project: l.project || "",
-            verification_call: !!l.verification_call,
-
-            // ✅ admin fields
-            createdBy: l.createdBy || "",
-            updatedBy: l.updatedBy || "",
-            createdAt: l.createdAt || null,
-            updatedAt: l.updatedAt || null,
-          }))
-        );
+        setModalRows(mapLeadsToRows(filtered));
         return;
       }
     }
@@ -751,6 +817,9 @@ export function UserDashboard() {
     followUpAlerts.today,
     followUpAlerts.tomorrow,
     adminBreakdown.addedTodayByUser,
+    adminBreakdown.updatedTodayByUser,
+    adminTodayLists.addedTodayLeads,
+    adminTodayLists.updatedTodayLeads,
   ]);
 
   const openModal = (type) => {
@@ -761,25 +830,7 @@ export function UserDashboard() {
 
     if (type === "leads") {
       title = "All Leads";
-      rows = (leadsData || []).map((l) => ({
-        id: l.lead_id || l._id,
-        leadKey: l.lead_id || l._id,
-        name: l.name || "",
-        mobile: l.mobile || "",
-        status: l.status || "",
-        source: l.source || "",
-        date: l.dob || null,
-        remarks: l.remarks || "",
-        Assigned_to: l.Assigned_to || "",
-        project: l.project || "",
-        verification_call: !!l.verification_call,
-
-        // ✅ admin fields
-        createdBy: l.createdBy || "",
-        updatedBy: l.updatedBy || "",
-        createdAt: l.createdAt || null,
-        updatedAt: l.updatedAt || null,
-      }));
+      rows = mapLeadsToRows(leadsData || []);
     } else if (type === "followups") {
       title = "Follow-Up Leads";
       rows = (followUpsData || []).map((fu) => {
@@ -811,47 +862,11 @@ export function UserDashboard() {
     } else if (type === "sitevisits") {
       title = "Site Visit Leads";
       const filtered = (leadsData || []).filter((l) => l.status === "Site Visited");
-      rows = filtered.map((l) => ({
-        id: l.lead_id || l._id,
-        leadKey: l.lead_id || l._id,
-        name: l.name || "",
-        mobile: l.mobile || "",
-        status: l.status || "",
-        source: l.source || "",
-        date: l.dob || null,
-        remarks: l.remarks || "",
-        Assigned_to: l.Assigned_to || "",
-        project: l.project || "",
-        verification_call: !!l.verification_call,
-
-        // ✅ admin fields
-        createdBy: l.createdBy || "",
-        updatedBy: l.updatedBy || "",
-        createdAt: l.createdAt || null,
-        updatedAt: l.updatedAt || null,
-      }));
+      rows = mapLeadsToRows(filtered);
     } else if (type === "booked") {
       title = "Booked Leads";
       const filtered = (leadsData || []).filter((l) => l.status === "Booked");
-      rows = filtered.map((l) => ({
-        id: l.lead_id || l._id,
-        leadKey: l.lead_id || l._id,
-        name: l.name || "",
-        mobile: l.mobile || "",
-        status: l.status || "",
-        source: l.source || "",
-        date: l.dob || null,
-        remarks: l.remarks || "",
-        Assigned_to: l.Assigned_to || "",
-        project: l.project || "",
-        verification_call: !!l.verification_call,
-
-        // ✅ admin fields
-        createdBy: l.createdBy || "",
-        updatedBy: l.updatedBy || "",
-        createdAt: l.createdAt || null,
-        updatedAt: l.updatedAt || null,
-      }));
+      rows = mapLeadsToRows(filtered);
     }
 
     setModalTitle(title);
@@ -1128,6 +1143,8 @@ export function UserDashboard() {
   }
 
   const isAdminAddedByUserModal = modalContext?.kind === "adminAddedTodayByUser";
+  const isAdminUpdatedByUserModal = modalContext?.kind === "adminUpdatedTodayByUser";
+  const isAdminCountModal = isAdminAddedByUserModal || isAdminUpdatedByUserModal;
 
   return (
     <div
@@ -1366,7 +1383,9 @@ export function UserDashboard() {
                   <Users size={20} />
                 </div>
                 <div>
-                  <div className="small text-muted">Added Today</div>
+                  <div className="small text-muted">
+                    {role === "admin" ? "Added Today (All)" : "Added Today"}
+                  </div>
                   <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
                     {stats.addedToday}
                   </div>
@@ -1386,7 +1405,9 @@ export function UserDashboard() {
                   <RefreshCw size={20} />
                 </div>
                 <div>
-                  <div className="small text-muted">Updated Today</div>
+                  <div className="small text-muted">
+                    {role === "admin" ? "Updated Today (All)" : "Updated Today"}
+                  </div>
                   <div className="fw-bold" style={{ fontSize: "1.4rem" }}>
                     {stats.updatedToday}
                   </div>
@@ -1413,6 +1434,33 @@ export function UserDashboard() {
                   </div>
                   <div>
                     <div className="small text-muted">Added Today (By User)</div>
+                    <div className="fw-bold" style={{ fontSize: "1.05rem" }}>
+                      View Breakdown →
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Admin only: Updated Today (By User) */}
+          {role === "admin" && (
+            <div className="col-12 col-md-6 col-xl-3">
+              <div
+                className="card border-0 shadow-sm h-100"
+                style={{ borderRadius: "1.1rem", cursor: "pointer" }}
+                onClick={openUpdatedTodayByUserModal}
+                title="View breakdown of leads updated today by each user"
+              >
+                <div className="card-body d-flex align-items-center gap-3">
+                  <div
+                    className="rounded-circle d-flex align-items-center justify-content-center"
+                    style={{ width: 46, height: 46, backgroundColor: "#dcfce7" }}
+                  >
+                    <RefreshCw size={20} />
+                  </div>
+                  <div>
+                    <div className="small text-muted">Updated Today (By User)</div>
                     <div className="fw-bold" style={{ fontSize: "1.05rem" }}>
                       View Breakdown →
                     </div>
@@ -1675,8 +1723,8 @@ export function UserDashboard() {
                       padding: "0.75rem",
                     }}
                   >
-                    {/* mobile filter inside modal (hide for admin breakdown modal) */}
-                    {!isAdminAddedByUserModal && (
+                    {/* mobile filter inside modal (hide for admin breakdown tables) */}
+                    {!isAdminCountModal && (
                       <div className="d-flex gap-2 align-items-center mb-2">
                         <input
                           className="form-control form-control-sm"
@@ -1697,13 +1745,16 @@ export function UserDashboard() {
                       <div className="p-4 text-center text-muted small">No records available.</div>
                     ) : (
                       <div className="table-responsive">
-                        {/* ✅ Admin Added Today by User modal table */}
-                        {isAdminAddedByUserModal ? (
+                        {/* ✅ Admin Count Modals (Added/Updated By User) */}
+                        {isAdminCountModal ? (
                           <table className="table table-sm table-hover mb-0 align-middle">
                             <thead className="table-light">
                               <tr className="small text-muted">
-                                <th style={{ width: "70%" }}>User</th>
-                                <th style={{ width: "30%" }}>Leads Added Today</th>
+                                <th style={{ width: "60%" }}>User</th>
+                                <th style={{ width: "20%" }}>
+                                  {isAdminAddedByUserModal ? "Leads Added Today" : "Leads Updated Today"}
+                                </th>
+                                <th style={{ width: "20%" }}>Details</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1711,6 +1762,19 @@ export function UserDashboard() {
                                 <tr key={r.id}>
                                   <td className="fw-semibold text-dark">{r.user}</td>
                                   <td className="fw-bold text-primary">{r.count}</td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm btn-outline-primary"
+                                      onClick={() =>
+                                        isAdminAddedByUserModal
+                                          ? openAddedTodayDetails(r.user)
+                                          : openUpdatedTodayDetails(r.user)
+                                      }
+                                    >
+                                      View Leads
+                                    </button>
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1741,7 +1805,8 @@ export function UserDashboard() {
                                 .filter((r) => mobileMatches(r.mobile, modalMobileSearch))
                                 .map((row, idx) => {
                                   const rowKey = row.leadKey || row.id;
-                                  const isEditing = editingRowId && editingRowId === rowKey && editRowData;
+                                  const isEditing =
+                                    editingRowId && editingRowId === rowKey && editRowData;
 
                                   return (
                                     <tr
@@ -1857,7 +1922,11 @@ export function UserDashboard() {
                                               >
                                                 <MessageSquareText size={14} />
                                                 <span>Remarks</span>
-                                                {showPrevRemarks ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                {showPrevRemarks ? (
+                                                  <ChevronUp size={14} />
+                                                ) : (
+                                                  <ChevronDown size={14} />
+                                                )}
                                               </button>
                                             </div>
 
@@ -1872,7 +1941,9 @@ export function UserDashboard() {
                                                   whiteSpace: "pre-wrap",
                                                 }}
                                               >
-                                                <div className="fw-semibold text-dark mb-1">Previous remarks</div>
+                                                <div className="fw-semibold text-dark mb-1">
+                                                  Previous remarks
+                                                </div>
                                                 {editRowData?.prevRemarks ? (
                                                   editRowData.prevRemarks
                                                 ) : (
@@ -1931,7 +2002,9 @@ export function UserDashboard() {
                                             <button
                                               type="button"
                                               className="btn btn-sm btn-outline-secondary"
-                                              onClick={cancelEditRow}
+                                              onClick={() => {
+                                                cancelEditRow();
+                                              }}
                                             >
                                               Cancel
                                             </button>
@@ -1958,7 +2031,7 @@ export function UserDashboard() {
 
                   <div className="modal-footer bg-light border-top">
                     <div className="me-auto small text-muted">
-                      {isAdminAddedByUserModal ? (
+                      {isAdminCountModal ? (
                         <>
                           Showing <strong>{modalRows.length}</strong> user(s)
                         </>
@@ -1988,7 +2061,10 @@ export function UserDashboard() {
         {showAddModal && (
           <div className="fixed inset-0 z-50 d-flex align-items-center justify-content-center bg-black bg-opacity-25">
             <div className="position-relative w-100" style={{ maxWidth: 720 }}>
-              <div className="rounded-4 bg-white border border-slate-200 shadow-2xl" style={{ maxHeight: "80vh", overflowY: "auto" }}>
+              <div
+                className="rounded-4 bg-white border border-slate-200 shadow-2xl"
+                style={{ maxHeight: "80vh", overflowY: "auto" }}
+              >
                 <div className="d-flex align-items-center justify-content-between px-4 py-3 border-bottom">
                   <h5 className="mb-0 fw-semibold d-flex align-items-center gap-2">
                     <span
