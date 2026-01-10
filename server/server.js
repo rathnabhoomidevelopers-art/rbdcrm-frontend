@@ -51,10 +51,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
 
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    );
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-Requested-With"
@@ -84,9 +81,7 @@ function signToken(payload) {
 function auth(allowedRoles = []) {
   return (req, res, next) => {
     const authHeader = req.headers.authorization || "";
-    const token = authHeader.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : null;
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
     if (!token) return res.status(401).json({ message: "No token provided" });
 
@@ -204,9 +199,7 @@ async function assignRoundRobinToLeads_(leads, settingsCol, usersCol) {
 app.post("/auth/admin-login", async (req, res) => {
   const { user_id, password } = req.body || {};
   if (!user_id || !password) {
-    return res
-      .status(400)
-      .json({ message: "Admin ID and password are required" });
+    return res.status(400).json({ message: "Admin ID and password are required" });
   }
 
   let clientObj;
@@ -227,10 +220,7 @@ app.post("/auth/admin-login", async (req, res) => {
     if (!isMatch) return res.status(400).json({ message: "Invalid credentials" });
 
     const role = user.role || "admin";
-    const normalizedUserName = (user.user_name || "")
-      .toString()
-      .trim()
-      .toLowerCase();
+    const normalizedUserName = (user.user_name || "").toString().trim().toLowerCase();
 
     const token = signToken({
       userId: user._id.toString(),
@@ -260,9 +250,7 @@ app.post("/auth/user-login", async (req, res) => {
   const normalizedName = rawName.trim().toLowerCase();
 
   if (!normalizedName || !password) {
-    return res
-      .status(400)
-      .json({ message: "User name and password are required" });
+    return res.status(400).json({ message: "User name and password are required" });
   }
 
   let clientObj;
@@ -339,9 +327,7 @@ app.post("/add-user", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const existing = await database
-      .collection("users")
-      .findOne({ user_name: normalizedName });
+    const existing = await database.collection("users").findOne({ user_name: normalizedName });
     if (existing) {
       return res.status(409).json({ message: "User already exists" });
     }
@@ -361,10 +347,7 @@ app.get("/users", auth(["admin", "user"]), async (req, res) => {
   try {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
-    const users = await database
-      .collection("users")
-      .find({}, { projection: { password: 0 } })
-      .toArray();
+    const users = await database.collection("users").find({}, { projection: { password: 0 } }).toArray();
 
     return res.status(200).json(users);
   } catch (err) {
@@ -400,11 +383,7 @@ app.get("/leads", auth(["admin", "user"]), async (req, res) => {
       const unassigned = await collection
         .find(
           {
-            $or: [
-              { Assigned_to: null },
-              { Assigned_to: "" },
-              { Assigned_to: { $exists: false } },
-            ],
+            $or: [{ Assigned_to: null }, { Assigned_to: "" }, { Assigned_to: { $exists: false } }],
           },
           { projection: { _id: 1, Assigned_to: 1 } }
         )
@@ -479,13 +458,15 @@ app.get("/lead/:id", auth(["admin", "user"]), async (req, res) => {
  * - If admin adds a lead without Assigned_to -> Round Robin assign
  * - If user adds a lead without Assigned_to -> assign to self (existing behavior)
  *
- * ✅ UPDATED (your requirement):
+ * ✅ UPDATED:
  * - Create follow-up ONLY if BOTH status + remarks are present (non-empty) AND status is TRACKED
+ *
+ * ✅ NEW:
+ * - Adds status_history[] to support "status changed to X today" reporting
  */
 app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
   const mobile = (req.body.mobile || "").toString().trim();
-  if (!mobile)
-    return res.status(400).json({ message: "Mobile number is required" });
+  if (!mobile) return res.status(400).json({ message: "Mobile number is required" });
 
   // Mobile normalize/validate
   let digits = mobile.replace(/\D/g, "");
@@ -521,8 +502,7 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
     if (existing) {
       return res.status(409).json({
         message: "Lead with this mobile number already exists",
-        lead_id:
-          existing.lead_id || (existing._id ? existing._id.toString() : null),
+        lead_id: existing.lead_id || (existing._id ? existing._id.toString() : null),
       });
     }
 
@@ -555,7 +535,9 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       tomorrow.setHours(9, 0, 0, 0);
       dob = tomorrow;
     }
+
     const actor = (req.user?.user_name || "").toString().trim().toLowerCase();
+
     const lead = {
       lead_id: new ObjectId().toHexString(),
       name: req.body.name || null,
@@ -569,12 +551,22 @@ app.post("/add-lead", auth(["admin", "user"]), async (req, res) => {
       dob: dob,
       Assigned_to: assignedTo || null,
       createdAt: new Date(),
-      updatedAt: new Date(), 
+      updatedAt: new Date(),
       createdBy: actor || null,
-      updatedBy: actor || null, 
+      updatedBy: actor || null,
       verification_call: false,
       original_assigned: null,
       transfer_date: null,
+
+      // ✅ NEW: status history
+      status_history: [
+        {
+          from: null,
+          to: status || null,
+          changedAt: new Date(),
+          changedBy: actor || null,
+        },
+      ],
     };
 
     await leadsCol.insertOne(lead);
@@ -625,14 +617,9 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
     if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
     if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
 
-    if (digits.length !== 10)
-      return { ok: false, digits, error: "Mobile must be 10 digits" };
+    if (digits.length !== 10) return { ok: false, digits, error: "Mobile must be 10 digits" };
     if (!/^[6-9]\d{9}$/.test(digits))
-      return {
-        ok: false,
-        digits,
-        error: "Mobile must start with 6-9",
-      };
+      return { ok: false, digits, error: "Mobile must start with 6-9" };
     return { ok: true, digits, error: null };
   };
 
@@ -648,7 +635,6 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
     const followUpsCol = database.collection("follow-ups");
     const usersCol = database.collection("users");
     const settingsCol = database.collection("settings");
-    
 
     const seenInFile = new Set();
     const valid = [];
@@ -673,9 +659,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
       }
       seenInFile.add(nm.digits);
 
-      let assignedTo = row.Assigned_to
-        ? row.Assigned_to.toString().trim().toLowerCase()
-        : null;
+      let assignedTo = row.Assigned_to ? row.Assigned_to.toString().trim().toLowerCase() : null;
 
       // UPDATED: treat spaces as empty
       if (assignedTo && !assignedTo.trim()) assignedTo = null;
@@ -709,7 +693,9 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
         tomorrow.setHours(9, 0, 0, 0);
         dob = tomorrow;
       }
+
       const actor = (req.user?.user_name || "").toString().trim().toLowerCase();
+
       valid.push({
         lead_id: new ObjectId().toHexString(),
         name: row.name || null,
@@ -729,6 +715,16 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
         verification_call: false,
         original_assigned: null,
         transfer_date: null,
+
+        // ✅ NEW: status history (initial entry)
+        status_history: [
+          {
+            from: null,
+            to: status || null,
+            changedAt: new Date(),
+            changedBy: actor || null,
+          },
+        ],
       });
     }
 
@@ -747,9 +743,7 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
     const existingDocs = await leadsCol
       .find({ mobile: { $in: mobiles } }, { projection: { mobile: 1 } })
       .toArray();
-    const existingSet = new Set(
-      existingDocs.map((d) => (d.mobile || "").toString())
-    );
+    const existingSet = new Set(existingDocs.map((d) => (d.mobile || "").toString()));
 
     const toInsert = [];
     const skippedExisting = [];
@@ -830,6 +824,9 @@ app.post("/add-leads-bulk", auth(["admin", "user"]), async (req, res) => {
  * - Trim status/remarks when updating
  * - AUTO_24H_STATUSES => tomorrow 9AM if dob missing AND status is in list
  * - Visit Scheduled requires dob (reject if missing)
+ *
+ * ✅ NEW:
+ * - Push into status_history[] when status changes
  */
 app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
   const leadId = req.params.id;
@@ -875,12 +872,12 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     const existingLead = await leadsCol.findOne({ $or: orFilters });
     if (!existingLead) return res.status(404).json({ message: "Lead not found" });
 
-    const newStatus = update.status;
     const currentUser = (req.user?.user_name || "").toString().trim().toLowerCase();
     const responseData = { message: "Lead updated successfully" };
 
     update.updatedAt = new Date();
-    update.updatedBy = currentUser || null; 
+    update.updatedBy = currentUser || null;
+
     // Helper: choose least-loaded user excluding current user
     async function pickNextUser(excludeUserName) {
       const allUsers = await usersCol
@@ -907,6 +904,9 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
     if ("dob" in update && update.dob && Number.isNaN(update.dob.getTime())) {
       update.dob = null;
     }
+
+    const prevStatus = existingLead.status ? existingLead.status.toString().trim() : null;
+    const newStatus = update.status; // may be undefined if not sent
 
     // ✅ Visit Scheduled requires date (dob)
     if (newStatus === "Visit Scheduled") {
@@ -950,8 +950,7 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
 
     // Transfer logic for Busy / NR-SF / RNR (only if not already verification_call)
     const shouldTransferCheck =
-      !existingLead.verification_call &&
-      (newStatus === "Busy" || newStatus === "NR/SF" || newStatus === "RNR");
+      !existingLead.verification_call && (newStatus === "Busy" || newStatus === "NR/SF" || newStatus === "RNR");
 
     if (shouldTransferCheck) {
       // "3 days" behavior implemented as "3 consecutive follow-ups with same status"
@@ -977,8 +976,29 @@ app.put("/edit-lead/:id", auth(["admin", "user"]), async (req, res) => {
       }
     }
 
+    // ✅ NEW: status history push only when status actually changes
+    const nextStatusComputed =
+      update.status !== undefined ? (update.status ? update.status.toString().trim() : null) : prevStatus;
+
+    const statusChanged =
+      update.status !== undefined &&
+      String(nextStatusComputed || "").trim() !== String(prevStatus || "").trim();
+
+    const updateOps = { $set: update };
+
+    if (statusChanged) {
+      updateOps.$push = {
+        status_history: {
+          from: prevStatus || null,
+          to: nextStatusComputed || null,
+          changedAt: new Date(),
+          changedBy: currentUser || null,
+        },
+      };
+    }
+
     // Update lead
-    await leadsCol.updateOne({ $or: orFilters }, { $set: update });
+    await leadsCol.updateOne({ $or: orFilters }, updateOps);
 
     const nextLead = { ...existingLead, ...update };
     const followupId = nextLead.lead_id || existingLead.lead_id;
@@ -1046,6 +1066,293 @@ app.delete("/delete-lead/:id", auth(["admin"]), async (req, res) => {
     if (clientObj) await clientObj.close();
   }
 });
+
+/* ======================================================
+   ✅ NEW REPORT API (ADMIN ONLY)
+   "status changed to X today" based on status_history
+   GET /reports/daily-status?date=YYYY-MM-DD&tzOffsetMinutes=-330
+====================================================== */
+
+app.get("/reports/daily-status", auth(["admin"]), async (req, res) => {
+  let clientObj;
+  try {
+    clientObj = await mongoClient.connect(connectionString);
+    const db = clientObj.db("crm");
+    const leadsCol = db.collection("leads");
+
+    const dateStr = (req.query.date || "").toString().trim(); // "2026-01-10"
+    const tzOffsetMinutes = Number(req.query.tzOffsetMinutes ?? 0); // browser offset: IST = -330
+
+    // If no date passed, use today's date in server clock, but still apply tzOffsetMinutes
+    const base = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
+    const y = base.getFullYear();
+    const m = base.getMonth();
+    const d = base.getDate();
+
+    // Local midnight range
+    const startLocalMs = new Date(y, m, d, 0, 0, 0, 0).getTime();
+    const endLocalMs = new Date(y, m, d + 1, 0, 0, 0, 0).getTime();
+
+    // Convert local range -> UTC range
+    const startUTC = new Date(startLocalMs - tzOffsetMinutes * 60 * 1000);
+    const endUTC = new Date(endLocalMs - tzOffsetMinutes * 60 * 1000);
+
+    // 1) Added today by user
+    const addedAgg = await leadsCol
+      .aggregate([
+        { $match: { createdAt: { $gte: startUTC, $lt: endUTC } } },
+        {
+          $group: {
+            _id: { $ifNull: ["$createdBy", "unknown"] },
+            added: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    // 2) Status changed to X today (history)
+    const statusAgg = await leadsCol
+      .aggregate([
+        { $unwind: "$status_history" },
+        {
+          $match: {
+            "status_history.changedAt": { $gte: startUTC, $lt: endUTC },
+            "status_history.to": { $ne: null },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              user: { $ifNull: ["$status_history.changedBy", "unknown"] },
+              to: "$status_history.to",
+            },
+            count: { $sum: 1 }, // number of changes to that status
+            leadsSet: { $addToSet: "$lead_id" }, // unique leads updated for this status
+          },
+        },
+        {
+          $group: {
+            _id: "$_id.user",
+            byStatus: { $push: { k: "$_id.to", v: "$count" } },
+            uniqueLeadsUpdatedSet: { $addToSet: "$leadsSet" }, // set of arrays
+            totalStatusChanges: { $sum: "$count" },
+          },
+        },
+      ])
+      .toArray();
+
+    // Normalize maps
+    const addedMap = {};
+    addedAgg.forEach((x) => {
+      const key = (x._id || "unknown").toString().trim().toLowerCase();
+      addedMap[key] = x.added;
+    });
+
+    const rows = statusAgg.map((u) => {
+      const user = (u._id || "unknown").toString().trim().toLowerCase();
+      const byStatusObj = Object.fromEntries((u.byStatus || []).map((p) => [p.k, p.v]));
+
+      // flatten nested arrays in uniqueLeadsUpdatedSet (it’s a set of arrays)
+      const uniqueSet = new Set();
+      (u.uniqueLeadsUpdatedSet || []).forEach((arr) => {
+        (arr || []).forEach((id) => uniqueSet.add(id));
+      });
+
+      return {
+        user,
+        added: addedMap[user] || 0,
+        updatedUniqueLeads: uniqueSet.size,
+        totalStatusChanges: u.totalStatusChanges || 0,
+        byStatus: byStatusObj,
+      };
+    });
+
+    // include users who only added but did not change status
+    Object.keys(addedMap).forEach((user) => {
+      if (!rows.find((r) => r.user === user)) {
+        rows.push({
+          user,
+          added: addedMap[user] || 0,
+          updatedUniqueLeads: 0,
+          totalStatusChanges: 0,
+          byStatus: {},
+        });
+      }
+    });
+
+    rows.sort(
+      (a, b) =>
+        (b.added + b.updatedUniqueLeads) - (a.added + a.updatedUniqueLeads)
+    );
+
+    return res.json({
+      date: dateStr || null,
+      range: { startUTC, endUTC },
+      rows,
+    });
+  } catch (err) {
+    console.error("daily-status report error:", err);
+    return res.status(500).json({ message: "Internal Server Error" });
+  } finally {
+    if (clientObj) await clientObj.close();
+  }
+});
+
+/* ======================================================
+   ✅ NEW: DAILY LEAD DETAILS (ADMIN ONLY)
+   GET /reports/daily-leads?date=YYYY-MM-DD&tzOffsetMinutes=-330
+   Returns: Added leads + Status-history events for that day with full lead details
+====================================================== */
+
+app.get("/reports/daily-leads", auth(["admin"]), async (req, res) => {
+  let clientObj;
+  try {
+    clientObj = await mongoClient.connect(connectionString);
+    const db = clientObj.db("crm");
+    const leadsCol = db.collection("leads");
+
+    const dateStr = (req.query.date || "").toString().trim(); // "2026-01-10"
+    const tzOffsetMinutes = Number(req.query.tzOffsetMinutes ?? 0); // IST = -330
+
+    const base = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
+    const y = base.getFullYear();
+    const m = base.getMonth();
+    const d = base.getDate();
+
+    const startLocalMs = new Date(y, m, d, 0, 0, 0, 0).getTime();
+    const endLocalMs = new Date(y, m, d + 1, 0, 0, 0, 0).getTime();
+
+    const startUTC = new Date(startLocalMs - tzOffsetMinutes * 60 * 1000);
+    const endUTC = new Date(endLocalMs - tzOffsetMinutes * 60 * 1000);
+
+    // 1) Added leads (full details)
+    const addedLeads = await leadsCol
+      .find(
+        { createdAt: { $gte: startUTC, $lt: endUTC } },
+        {
+          projection: {
+            _id: 1,
+            lead_id: 1,
+            name: 1,
+            mobile: 1,
+            source: 1,
+            status: 1,
+            project: 1,
+            remarks: 1,
+            dob: 1,
+            Assigned_to: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            createdBy: 1,
+            updatedBy: 1,
+          },
+        }
+      )
+      .sort({ createdAt: 1 })
+      .toArray();
+
+    const addedRows = addedLeads.map((l) => ({
+      user: (l.createdBy || "unknown").toString().trim().toLowerCase(),
+      action: "Added",
+      changedAt: l.createdAt || null,
+      fromStatus: null,
+      toStatus: l.status || null,
+
+      lead_id: l.lead_id || (l._id ? l._id.toString() : null),
+      name: l.name || "",
+      mobile: l.mobile || "",
+      source: l.source || "",
+      status: l.status || "",
+      project: l.project || "",
+      remarks: l.remarks || "",
+      dob: l.dob || null,
+      Assigned_to: l.Assigned_to || "",
+
+      createdAt: l.createdAt || null,
+      updatedAt: l.updatedAt || null,
+      createdBy: l.createdBy || "",
+      updatedBy: l.updatedBy || "",
+    }));
+
+    // 2) Status history rows (full details per event)
+    const statusRows = await leadsCol
+      .aggregate([
+        { $unwind: "$status_history" },
+        {
+          $match: {
+            "status_history.changedAt": { $gte: startUTC, $lt: endUTC },
+          },
+        },
+        {
+          $project: {
+            lead_id: { $ifNull: ["$lead_id", { $toString: "$_id" }] },
+            name: 1,
+            mobile: 1,
+            source: 1,
+            status: 1,
+            project: 1,
+            remarks: 1,
+            dob: 1,
+            Assigned_to: 1,
+            createdAt: 1,
+            updatedAt: 1,
+            createdBy: 1,
+            updatedBy: 1,
+
+            fromStatus: "$status_history.from",
+            toStatus: "$status_history.to",
+            changedAt: "$status_history.changedAt",
+            user: { $ifNull: ["$status_history.changedBy", "unknown"] },
+          },
+        },
+        { $sort: { changedAt: 1 } },
+      ])
+      .toArray();
+
+    const historyRows = statusRows.map((x) => ({
+      user: (x.user || "unknown").toString().trim().toLowerCase(),
+      action: "Status Change",
+      changedAt: x.changedAt || null,
+      fromStatus: x.fromStatus || null,
+      toStatus: x.toStatus || null,
+
+      lead_id: x.lead_id || null,
+      name: x.name || "",
+      mobile: x.mobile || "",
+      source: x.source || "",
+      status: x.status || "",
+      project: x.project || "",
+      remarks: x.remarks || "",
+      dob: x.dob || null,
+      Assigned_to: x.Assigned_to || "",
+
+      createdAt: x.createdAt || null,
+      updatedAt: x.updatedAt || null,
+      createdBy: x.createdBy || "",
+      updatedBy: x.updatedBy || "",
+    }));
+
+    // Combine
+    const rows = [...addedRows, ...historyRows].sort((a, b) => {
+      const ta = a.changedAt ? new Date(a.changedAt).getTime() : 0;
+      const tb = b.changedAt ? new Date(b.changedAt).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return (a.user || "").localeCompare(b.user || "");
+    });
+
+    return res.json({
+      date: dateStr || null,
+      range: { startUTC, endUTC },
+      rows,
+    });
+  } catch (err) {
+    console.error("daily-leads report error:", err);
+    return res.status(500).json({ message: "Internal Server Error" });
+  } finally {
+    if (clientObj) await clientObj.close();
+  }
+});
+
 
 /* STATUS SETTINGS */
 
@@ -1155,9 +1462,10 @@ app.put("/edit-follow_up/:id", auth(["admin", "user"]), async (req, res) => {
   try {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
-    const result = await database
-      .collection("follow-ups")
-      .updateOne({ followup_id: id }, { $set: update });
+    const result = await database.collection("follow-ups").updateOne(
+      { followup_id: id },
+      { $set: update }
+    );
 
     if (result.matchedCount === 0) {
       return res.status(404).json({ message: "Follow-up not found" });
@@ -1194,9 +1502,7 @@ app.get("/follow-up/:id", auth(["admin", "user"]), async (req, res) => {
   try {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
-    const doc = await database
-      .collection("follow-ups")
-      .findOne({ followup_id: id });
+    const doc = await database.collection("follow-ups").findOne({ followup_id: id });
 
     if (!doc) return res.status(404).json({ message: "Follow-up not found" });
     return res.status(200).json(doc);
@@ -1216,9 +1522,7 @@ app.delete("/delete-follow_up/:id", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const result = await database
-      .collection("follow-ups")
-      .deleteOne({ followup_id: id });
+    const result = await database.collection("follow-ups").deleteOne({ followup_id: id });
     if (result.deletedCount === 0) {
       return res.status(404).json({ message: "Follow-up not found" });
     }
@@ -1241,9 +1545,7 @@ app.post("/site_visit", auth(["admin", "user"]), async (req, res) => {
     visit_id: req.body.visit_id,
     name: req.body.name,
     mobile: req.body.mobile ? parseInt(req.body.mobile, 10) : null,
-    site_visit_date: req.body.site_visit_date
-      ? new Date(req.body.site_visit_date)
-      : null,
+    site_visit_date: req.body.site_visit_date ? new Date(req.body.site_visit_date) : null,
     Assigned_to: req.body.Assigned_to,
     created_by: req.body.created_by,
   };
@@ -1253,9 +1555,7 @@ app.post("/site_visit", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
     await database.collection("site_visit").insertOne(visit);
-    return res
-      .status(201)
-      .json({ message: "Site visit added successfully" });
+    return res.status(201).json({ message: "Site visit added successfully" });
   } catch (err) {
     console.error("Site visit add error", err);
     return res.status(500).json({ message: "Internal Server Error" });
@@ -1271,9 +1571,7 @@ app.put("/edit_site_visit/:id", auth(["admin", "user"]), async (req, res) => {
     visit_id: req.body.visit_id,
     name: req.body.name,
     mobile: req.body.mobile ? parseInt(req.body.mobile, 10) : null,
-    site_visit_date: req.body.site_visit_date
-      ? new Date(req.body.site_visit_date)
-      : null,
+    site_visit_date: req.body.site_visit_date ? new Date(req.body.site_visit_date) : null,
     Assigned_to: req.body.Assigned_to,
     created_by: req.body.created_by,
   };
@@ -1283,12 +1581,10 @@ app.put("/edit_site_visit/:id", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    await database
-      .collection("site_visit")
-      .updateOne({ visit_id: id }, { $set: visit });
+    await database.collection("site_visit").updateOne({ visit_id: id }, { $set: visit });
     return res.status(200).json({ message: "Site visit updated" });
   } catch (err) {
-    console.error("Site visit update error", err);
+    console.error("Site visit update error:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   } finally {
     if (clientObj) await clientObj.close();
@@ -1318,9 +1614,7 @@ app.get("/site_visits/:id", auth(["admin", "user"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const doc = await database
-      .collection("site_visit")
-      .findOne({ visit_id: id });
+    const doc = await database.collection("site_visit").findOne({ visit_id: id });
     if (!doc) return res.status(404).json({ message: "Site visit not found" });
 
     return res.status(200).json(doc);
@@ -1340,9 +1634,7 @@ app.delete("/delete/site_visit/:id", auth(["admin"]), async (req, res) => {
     clientObj = await mongoClient.connect(connectionString);
     const database = clientObj.db("crm");
 
-    const result = await database
-      .collection("site_visit")
-      .deleteOne({ visit_id: id });
+    const result = await database.collection("site_visit").deleteOne({ visit_id: id });
     if (result.deletedCount === 0) {
       return res.status(404).json({ message: "Site visit not found" });
     }

@@ -9,6 +9,7 @@ import UserDashboard from "./UserDashboard";
 import UserLogin from "./UserLogin";
 import AdminLogin from "./AdminLogin";
 import { ExtraPage } from "./ExtraPage";
+import AdminDailyReport from "./AdminDailyReport";
 
 function RequireAuth({ allowedRoles, children }) {
   const token = localStorage.getItem("token");
@@ -83,6 +84,7 @@ function App() {
             </RequireAuth>
           }
         />
+        <Route path="/admin/daily-report" element={<AdminDailyReport/>} />
         <Route
           path="/extra"
           element={

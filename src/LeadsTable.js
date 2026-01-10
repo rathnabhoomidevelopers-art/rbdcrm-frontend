@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// src/LeadsTable.js
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { CircleXIcon } from "lucide-react";
 import { api } from "./api";
@@ -21,7 +22,8 @@ const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Bu
 
 const HARD_LOCK_STATUSES = ["NR/SF", "RNR", "Busy"];
 
-const SOURCE_OPTIONS = [
+// ✅ Default source options (base list)
+const DEFAULT_SOURCE_OPTIONS = [
   "Google Ads",
   "Meta Ads",
   "WhatsApp",
@@ -30,11 +32,7 @@ const SOURCE_OPTIONS = [
   "Website",
   "Walk-in",
   "Referral",
-  "99acres",
   "Shilpa K Leads",
-  "Roopa Leads",
-  "Shilpa G Leads",
-  "Sreyash Leads"
 ];
 
 const PROJECT_OPTIONS = [
@@ -48,6 +46,9 @@ const PROJECT_OPTIONS = [
   "Vajram vivera",
   "SLV golden towers",
 ];
+
+// localStorage key to persist sources (shared on same browser)
+const SOURCE_STORAGE_KEY = "crm_source_options_v1";
 
 const normalizeAndValidateMobile = (raw) => {
   if (!raw) {
@@ -111,8 +112,42 @@ const normalizeDobFromBackend = (dob) => {
   return toLocalInputValue(d);
 };
 
+// ✅ load sources from localStorage and merge with defaults
+const loadSourceOptions = () => {
+  try {
+    const raw = localStorage.getItem(SOURCE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+
+    const extra = Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [];
+    const merged = [...DEFAULT_SOURCE_OPTIONS];
+
+    const seen = new Set(merged.map((x) => x.trim().toLowerCase()));
+    extra.forEach((s) => {
+      const t = String(s || "").trim();
+      if (!t) return;
+      const k = t.toLowerCase();
+      if (seen.has(k)) return;
+      merged.push(t);
+      seen.add(k);
+    });
+
+    return merged;
+  } catch {
+    return [...DEFAULT_SOURCE_OPTIONS];
+  }
+};
+
+const saveSourceOptions = (opts) => {
+  try {
+    // store ONLY extras (optional), but easiest: store full list
+    localStorage.setItem(SOURCE_STORAGE_KEY, JSON.stringify(opts || []));
+  } catch {
+    // ignore
+  }
+};
+
 export function LeadsTable() {
-  const role = localStorage.getItem("role");
+  const role = localStorage.getItem("role"); // "admin" | "user"
   const rawUsername = (localStorage.getItem("username") || "").toString().trim();
   const usernameKey = rawUsername.toLowerCase();
 
@@ -143,6 +178,34 @@ export function LeadsTable() {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const projectOptions = PROJECT_OPTIONS;
+
+  // ✅ Sources in state + admin add source input
+  const [sourceOptions, setSourceOptions] = useState(() => loadSourceOptions());
+  const [newSourceText, setNewSourceText] = useState("");
+
+  const sortedSourceOptions = useMemo(() => {
+    // Keep defaults order, extras appended already; optionally sort extras.
+    return sourceOptions;
+  }, [sourceOptions]);
+
+  const addNewSource = (value) => {
+    const t = String(value || "").trim();
+    if (!t) {
+      toast.error("Enter a source name");
+      return;
+    }
+    const key = t.toLowerCase();
+    const exists = sourceOptions.some((s) => String(s).trim().toLowerCase() === key);
+    if (exists) {
+      toast.error("Source already exists");
+      return;
+    }
+
+    const next = [...sourceOptions, t];
+    setSourceOptions(next);
+    saveSourceOptions(next);
+    toast.success("Source added");
+  };
 
   const getAssignedToValue = (assigned) => {
     if (assigned && assigned.toString().trim() !== "") return assigned;
@@ -235,7 +298,10 @@ export function LeadsTable() {
           }
           updated.dob = value || "";
         } else if (field === "Assigned_to") {
-          return lead;
+          return lead; // locked
+        } else if (field === "source") {
+          // ✅ source dropdown only
+          updated.source = value || "";
         } else {
           updated[field] = value;
         }
@@ -297,8 +363,7 @@ export function LeadsTable() {
         });
       }
 
-      // NOTE: your backend /edit-lead already upserts follow-up now.
-      // Keeping this block for backward compatibility, but you can safely remove it later.
+      // Backward compatibility block (optional)
       if (TRACKED_STATUSES.includes(statusToSave)) {
         const followUpDate = dobToSave || getTomorrow9AMForInput();
         await api.post("/add-follow_up", {
@@ -405,7 +470,10 @@ export function LeadsTable() {
         }
         updated.dob = value || "";
       } else if (field === "Assigned_to") {
-        return prev;
+        return prev; // locked
+      } else if (field === "source") {
+        // ✅ dropdown only
+        updated.source = value || "";
       } else {
         updated[field] = value;
       }
@@ -536,12 +604,6 @@ export function LeadsTable() {
   if (!leads.length) {
     return (
       <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-10">
-        <datalist id="lead-source-options">
-          {SOURCE_OPTIONS.map((opt) => (
-            <option key={opt} value={opt} />
-          ))}
-        </datalist>
-
         <div className="max-w-5xl mx-auto">
           <div className="mb-6 flex items-center justify-between gap-3">
             <div>
@@ -551,9 +613,7 @@ export function LeadsTable() {
                 </span>
                 Lead Call Tracking
               </h3>
-              <p className="text-sm text-slate-500">
-                View, update and follow up your real estate leads in one place.
-              </p>
+              <p className="text-sm text-slate-500">View, update and follow up your real estate leads in one place.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -580,8 +640,13 @@ export function LeadsTable() {
 
         {showAddModal && (
           <AddLeadModal
+            role={role}
             newLead={newLead}
             projectOptions={projectOptions}
+            sourceOptions={sortedSourceOptions}
+            newSourceText={newSourceText}
+            setNewSourceText={setNewSourceText}
+            addNewSource={addNewSource}
             getAssignedToValue={getAssignedToValue}
             closeAddLeadModal={closeAddLeadModal}
             handleAddLeadSubmit={handleAddLeadSubmit}
@@ -622,12 +687,6 @@ export function LeadsTable() {
 
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4 sm:px-6 lg:px-10">
-      <datalist id="lead-source-options">
-        {SOURCE_OPTIONS.map((opt) => (
-          <option key={opt} value={opt} />
-        ))}
-      </datalist>
-
       <div className="max-w-5xl mx-auto">
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
@@ -665,7 +724,10 @@ export function LeadsTable() {
               Total Leads: <span className="font-semibold text-blue-600">{leads.length}</span>
             </span>
             <span>
-              Current: <span className="font-semibold text-emerald-600">{safeIndex + 1} / {leads.length}</span>
+              Current:{" "}
+              <span className="font-semibold text-emerald-600">
+                {safeIndex + 1} / {leads.length}
+              </span>
             </span>
           </div>
         </div>
@@ -713,11 +775,6 @@ export function LeadsTable() {
                   className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800"
                   value={currentLead.mobile || ""}
                 />
-                {currentLead.source && (
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Source: <span className="font-medium text-slate-700">{currentLead.source}</span>
-                  </p>
-                )}
               </div>
 
               <div className="space-y-1">
@@ -797,16 +854,58 @@ export function LeadsTable() {
                 />
               </div>
 
+              {/* ✅ Source dropdown ONLY (no textbox) */}
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">Source</label>
-                <input
-                  type="text"
-                  list="lead-source-options"
+                <select
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
                   value={currentLead.source || ""}
                   onChange={(e) => handleFieldChange(currentLead.lead_id, "source", e.target.value)}
-                  placeholder="Select or type source"
-                />
+                >
+                  <option value="">Select source</option>
+                  {sortedSourceOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+
+                {/* ✅ Admin-only add source UI (dynamic) */}
+                {role === "admin" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/60 focus:border-blue-500"
+                      placeholder="Add new source (admin only)"
+                      value={newSourceText}
+                      onChange={(e) => setNewSourceText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const val = newSourceText;
+                          addNewSource(val);
+                          // also set current lead source to new one
+                          const t = String(val || "").trim();
+                          if (t) handleFieldChange(currentLead.lead_id, "source", t);
+                          setNewSourceText("");
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition"
+                      onClick={() => {
+                        const val = newSourceText;
+                        addNewSource(val);
+                        const t = String(val || "").trim();
+                        if (t) handleFieldChange(currentLead.lead_id, "source", t);
+                        setNewSourceText("");
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -903,8 +1002,13 @@ export function LeadsTable() {
 
         {showAddModal && (
           <AddLeadModal
+            role={role}
             newLead={newLead}
             projectOptions={projectOptions}
+            sourceOptions={sortedSourceOptions}
+            newSourceText={newSourceText}
+            setNewSourceText={setNewSourceText}
+            addNewSource={addNewSource}
             getAssignedToValue={getAssignedToValue}
             closeAddLeadModal={closeAddLeadModal}
             handleAddLeadSubmit={handleAddLeadSubmit}
@@ -921,8 +1025,13 @@ export function LeadsTable() {
 }
 
 function AddLeadModal({
+  role,
   newLead,
   projectOptions,
+  sourceOptions,
+  newSourceText,
+  setNewSourceText,
+  addNewSource,
   getAssignedToValue,
   closeAddLeadModal,
   handleAddLeadSubmit,
@@ -972,16 +1081,57 @@ function AddLeadModal({
               />
             </div>
 
-            <div className="space-y-1">
+            {/* ✅ Source dropdown ONLY (no textbox) */}
+            <div className="space-y-1 sm:col-span-2">
               <label className="text-slate-500 text-xs">Source</label>
-              <input
-                type="text"
-                list="lead-source-options"
+              <select
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/80 focus:border-blue-500"
-                value={newLead.source}
+                value={newLead.source || ""}
                 onChange={(e) => handleNewLeadChange("source", e.target.value)}
-                placeholder="Select or type source"
-              />
+              >
+                <option value="">Select source</option>
+                {sourceOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+
+              {/* ✅ Admin-only add source UI */}
+              {role === "admin" && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/60 focus:border-blue-500"
+                    placeholder="Add new source (admin only)"
+                    value={newSourceText}
+                    onChange={(e) => setNewSourceText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = newSourceText;
+                        addNewSource(val);
+                        const t = String(val || "").trim();
+                        if (t) handleNewLeadChange("source", t);
+                        setNewSourceText("");
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 transition"
+                    onClick={() => {
+                      const val = newSourceText;
+                      addNewSource(val);
+                      const t = String(val || "").trim();
+                      if (t) handleNewLeadChange("source", t);
+                      setNewSourceText("");
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -1107,9 +1257,8 @@ function AddLeadModal({
 
 /**
  * ✅ UPDATED BulkLeadUpload:
- * - Instead of posting /add-lead in a loop (slow),
- *   it posts ONCE to /add-leads-bulk (fast).
- * - It shows detailed row errors returned by server (invalid rows, duplicates, etc.).
+ * - posts ONCE to /add-leads-bulk
+ * - shows detailed row errors returned by server
  */
 function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
   const [fileName, setFileName] = useState("");
@@ -1117,21 +1266,9 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
   const [parseErrors, setParseErrors] = useState([]);
   const [uploading, setUploading] = useState(false);
 
-  const existingMobiles = new Set(
-    (existingLeads || []).map((l) => (l.mobile || "").toString().trim())
-  );
+  const existingMobiles = new Set((existingLeads || []).map((l) => (l.mobile || "").toString().trim()));
 
-  const expectedHeaders = [
-    "name",
-    "mobile",
-    "source",
-    "status",
-    "job_role",
-    "budget",
-    "project",
-    "remarks",
-    "dob",
-  ];
+  const expectedHeaders = ["name", "mobile", "source", "status", "job_role", "budget", "project", "remarks", "dob"];
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -1166,9 +1303,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
 
       const missing = expectedHeaders.filter((h) => !headers.includes(h));
       if (missing.length > 0) {
-        setParseErrors([
-          `Missing required columns: ${missing.join(", ")}. Expected header: ${expectedHeaders.join(",")}`,
-        ]);
+        setParseErrors([`Missing required columns: ${missing.join(", ")}. Expected header: ${expectedHeaders.join(",")}`]);
         return;
       }
 
@@ -1198,20 +1333,17 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
         }
         row.mobile = normalized;
 
-        // quick client-side duplicate check
         if (localSeen.has(row.mobile)) {
           localErrors.push(`Row ${idx + 2}: Duplicate mobile in file (${row.mobile})`);
           return;
         }
         localSeen.add(row.mobile);
 
-        // quick client-side existing CRM check
         if (existingMobiles.has(row.mobile)) {
           localErrors.push(`Row ${idx + 2}: Mobile already exists in CRM (${row.mobile})`);
           return;
         }
 
-        // Visit Scheduled => dob required
         const statusToSave = (row.status || "").trim();
         const dobToSave = (row.dob || "").trim();
         if (statusToSave === "Visit Scheduled" && (!dobToSave || dobToSave === "")) {
@@ -1219,7 +1351,6 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
           return;
         }
 
-        // if auto follow-up and dob empty => set tomorrow 9AM (send to backend already filled)
         if (AUTO_24H_STATUSES.includes(statusToSave) && (!dobToSave || dobToSave === "")) {
           row.dob = getTomorrow9AMForInput();
         }
@@ -1246,7 +1377,6 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
     const rawUsername = (localStorage.getItem("username") || "").toString().trim().toLowerCase();
 
     try {
-      // attach Assigned_to for each row (backend also assigns if user role)
       const payloadRows = rows.map((r) => ({
         name: r.name || null,
         mobile: (r.mobile || "").toString().trim(),
@@ -1260,19 +1390,15 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
         Assigned_to: rawUsername || null,
       }));
 
-      // ✅ ONE API CALL (FAST)
       const res = await api.post("/add-leads-bulk", { leads: payloadRows });
 
       const inserted = res?.data?.inserted || 0;
       const skippedExisting = res?.data?.skippedExisting || 0;
 
       const invalidFromServer = Array.isArray(res?.data?.invalid) ? res.data.invalid : [];
-      const serverIssues = invalidFromServer.map(
-        (x) => `Row ${x.row}: ${x.reason} (value: "${x.mobile || ""}")`
-      );
+      const serverIssues = invalidFromServer.map((x) => `Row ${x.row}: ${x.reason} (value: "${x.mobile || ""}")`);
 
-      // refresh leads from server (we don't get the inserted docs back)
-      // this guarantees UI is consistent even if backend skipped duplicates
+      // refresh leads from server
       const fresh = await api.get("/leads");
       const data = fresh.data || [];
 
@@ -1288,21 +1414,13 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
         return { ...lead, status, dob: normalizeDobFromBackend(lead.dob) };
       });
 
-      // update parent list
-      // (use onLeadsAdded minimal; we simply replace by triggering event + reload via merge)
-      // easiest: prepend none, just notify and reload using the fetched normalized
-      onLeadsAdded(normalized.slice(0, 0)); // no-op merge, but keep your contract
+      onLeadsAdded(normalized.slice(0, 0)); // keep your current contract
       window.dispatchEvent(new Event("leads-updated"));
-
-      // local state update (full replace)
-      // This component does not have access to setLeads, so we rely on reload behavior in parent.
-      // If you want full replace here, move setLeads to props; for now we show success and close.
 
       toast.success(`Bulk upload done. Inserted ${inserted}, Skipped ${skippedExisting}.`);
 
       if (serverIssues.length) {
         setParseErrors(serverIssues.slice(0, 50));
-        // keep modal open so user can see errors
       } else {
         onClose();
       }
@@ -1341,9 +1459,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
 
         <div className="px-5 py-4 space-y-4 text-xs">
           <div className="space-y-2">
-            <p className="text-slate-600">
-              Upload a CSV file with the following header (exactly in this order):
-            </p>
+            <p className="text-slate-600">Upload a CSV file with the following header (exactly in this order):</p>
             <pre className="bg-slate-900 text-slate-100 text-[11px] rounded-lg px-3 py-2 overflow-x-auto">
 {`name,mobile,source,status,job_role,budget,project,remarks,dob`}
             </pre>
@@ -1361,7 +1477,8 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
                 <strong>dob</strong> format: YYYY-MM-DDTHH:mm (e.g. 2025-12-05T11:30).
               </li>
               <li>
-                For auto follow-up statuses (NR/SF, RNR, Details_shared, Site Visited, Busy), if dob is empty it will be auto-set to tomorrow 09:00 AM.
+                For auto follow-up statuses (NR/SF, RNR, Details_shared, Site Visited, Busy), if dob is empty it will be
+                auto-set to tomorrow 09:00 AM.
               </li>
             </ul>
           </div>
@@ -1384,12 +1501,10 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
           {rows.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 space-y-1">
               <p>
-                Parsed rows (ready to upload):{" "}
-                <span className="font-semibold text-emerald-700">{rows.length}</span>
+                Parsed rows (ready to upload): <span className="font-semibold text-emerald-700">{rows.length}</span>
               </p>
               <p>
-                Existing leads in CRM:{" "}
-                <span className="font-semibold text-blue-700">{existingLeads?.length || 0}</span>
+                Existing leads in CRM: <span className="font-semibold text-blue-700">{existingLeads?.length || 0}</span>
               </p>
               <p className="text-[10px] text-slate-500">
                 Upload uses single API call: <span className="font-mono">/add-leads-bulk</span>
@@ -1405,9 +1520,7 @@ function BulkLeadUpload({ existingLeads, onClose, onLeadsAdded }) {
                   <li key={idx}>{err}</li>
                 ))}
               </ul>
-              {parseErrors.length > 50 && (
-                <p className="mt-1 text-[10px] text-red-500">Showing first 50 errors only.</p>
-              )}
+              {parseErrors.length > 50 && <p className="mt-1 text-[10px] text-red-500">Showing first 50 errors only.</p>}
             </div>
           )}
         </div>

@@ -45,11 +45,10 @@ const SOURCE_OPTIONS = [
   "Website",
   "Walk-in",
   "Referral",
-  "99acres",
+  "99 acres",
   "Shilpa K Leads",
-  "Roopa Leads",
-  "Shilpa G Leads",
-  "Sreyash Leads",
+  "Magic Bricks",
+  "Own Lead",
 ];
 
 const PROJECT_OPTIONS = [

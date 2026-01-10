@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 
-// Source dropdown options (edit this list anytime)
-const SOURCE_OPTIONS = [
+// ✅ Default Source dropdown options (base list)
+const DEFAULT_SOURCE_OPTIONS = [
   "Google Ads",
   "Meta Ads",
   "WhatsApp",
@@ -24,11 +24,10 @@ const SOURCE_OPTIONS = [
   "Website",
   "Walk-in",
   "Referral",
-  "99acres",
+  "99 acres",
   "Shilpa K Leads",
-  "Roopa Leads",
-  "Shilpa G Leads",
-  "Sreyash Leads",
+  "Magic Bricks",
+  "Own Lead",
 ];
 
 const PROJECT_OPTIONS = [
@@ -150,6 +149,10 @@ const mobileMatches = (mobileValue, query) => {
   return m.includes(q);
 };
 
+// ✅ LocalStorage for dynamic sources (admin can add)
+const SOURCE_STORAGE_KEY = "crm_source_options_v1";
+const safeLower = (v) => String(v || "").trim().toLowerCase();
+
 export function UserDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -221,6 +224,61 @@ export function UserDashboard() {
     .toString()
     .trim()
     .toLowerCase();
+
+  // ✅ Dynamic source list (admin can add new, persisted in localStorage)
+  const [sourceOptions, setSourceOptions] = useState(() => {
+    try {
+      const raw = localStorage.getItem(SOURCE_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      const arr = Array.isArray(parsed) ? parsed : null;
+      const merged = [...DEFAULT_SOURCE_OPTIONS];
+
+      (arr || []).forEach((s) => {
+        const val = String(s || "").trim();
+        if (!val) return;
+        const exists = merged.some((x) => safeLower(x) === safeLower(val));
+        if (!exists) merged.push(val);
+      });
+
+      return merged;
+    } catch {
+      return [...DEFAULT_SOURCE_OPTIONS];
+    }
+  });
+
+  // ✅ Admin add source form state (ONLY for admin)
+  const [newSourceText, setNewSourceText] = useState("");
+
+  const persistSources = (arr) => {
+    try {
+      localStorage.setItem(SOURCE_STORAGE_KEY, JSON.stringify(arr));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAddNewSource = (e) => {
+    e.preventDefault();
+    if (role !== "admin") return;
+
+    const val = String(newSourceText || "").trim();
+    if (!val) {
+      toast.error("Enter source name");
+      return;
+    }
+
+    const exists = sourceOptions.some((x) => safeLower(x) === safeLower(val));
+    if (exists) {
+      toast.error("Source already exists");
+      return;
+    }
+
+    const updated = [...sourceOptions, val];
+    setSourceOptions(updated);
+    persistSources(updated);
+    setNewSourceText("");
+    toast.success("Source added");
+  };
 
   const formatDateTime = (value) => {
     if (!value) return "";
@@ -331,7 +389,10 @@ export function UserDashboard() {
       if (showFullScreenLoader) setLoading(true);
       setRefreshing(!showFullScreenLoader);
 
-      const [leadsRes, followUpsRes] = await Promise.all([api.get("/leads"), api.get("/follow-ups")]);
+      const [leadsRes, followUpsRes] = await Promise.all([
+        api.get("/leads"),
+        api.get("/follow-ups"),
+      ]);
 
       let leads = leadsRes.data || [];
       let followUpsAll = followUpsRes.data || [];
@@ -391,7 +452,12 @@ export function UserDashboard() {
 
         const created = l.createdAt ? new Date(l.createdAt) : null;
         const updated = l.updatedAt ? new Date(l.updatedAt) : null;
-        if (!created || !updated || Number.isNaN(created.getTime()) || Number.isNaN(updated.getTime()))
+        if (
+          !created ||
+          !updated ||
+          Number.isNaN(created.getTime()) ||
+          Number.isNaN(updated.getTime())
+        )
           return false;
 
         // Exclude new leads (created today and updated in same minute)
@@ -1160,12 +1226,6 @@ export function UserDashboard() {
       `}</style>
 
       <div className="container-xl" style={{ maxWidth: "1500px" }}>
-        <datalist id="source-options">
-          {SOURCE_OPTIONS.map((s) => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
-
         {/* HEADER */}
         <div className="row mb-4">
           <div className="col-12">
@@ -1201,7 +1261,9 @@ export function UserDashboard() {
                       </span>
                       <div>
                         <h2 className="fw-semibold mb-1" style={{ fontSize: "2rem" }}>
-                          {role === "admin" ? "Admin Follow-up Dashboard" : "User Performance Dashboard"}
+                          {role === "admin"
+                            ? "Admin Follow-up Dashboard"
+                            : "User Performance Dashboard"}
                         </h2>
                         <div style={{ opacity: 0.9, maxWidth: 520, fontSize: "1rem" }}>
                           Stay on top of your <strong>leads, follow-ups, site visits</strong> and{" "}
@@ -1237,6 +1299,32 @@ export function UserDashboard() {
                         Clear
                       </button>
                     </div>
+
+                    {/* ✅ Admin only: Add new Source (dynamic) */}
+                    {role === "admin" && (
+                      <form
+                        onSubmit={handleAddNewSource}
+                        className="d-flex gap-2 align-items-center flex-wrap mt-3"
+                      >
+                        <input
+                          className="form-control form-control-sm"
+                          style={{ width: 260 }}
+                          placeholder="Add new source (Admin only)..."
+                          value={newSourceText}
+                          onChange={(e) => setNewSourceText(e.target.value)}
+                        />
+                        <button type="submit" className="btn btn-warning btn-sm">
+                          Add Source
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline-light btn-sm"
+                          onClick={() => setNewSourceText("")}
+                        >
+                          Clear
+                        </button>
+                      </form>
+                    )}
                   </div>
 
                   <div className="d-flex flex-column align-items-end gap-2">
@@ -1251,7 +1339,16 @@ export function UserDashboard() {
                         <RefreshCw size={16} className={refreshing ? "spin" : ""} />
                         <span>{refreshing ? "Refreshing…" : "Refresh Data"}</span>
                       </button>
-
+                      {role === "admin" && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-light d-flex align-items-center gap-2 px-4 py-2 shadow-sm rounded-pill"
+                          onClick={() => window.location.assign("/admin/daily-report")}
+                          style={{ fontSize: "0.95rem", fontWeight: 600 }}
+                        >
+                          📄 Daily Report
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-warning d-flex align-items-center gap-2 px-4 py-2 shadow-sm rounded-pill"
@@ -1532,7 +1629,9 @@ export function UserDashboard() {
                     </div>
 
                     {followUpAlerts.overdue.length === 0 ? (
-                      <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>No overdue follow-ups.</div>
+                      <div style={{ fontSize: "0.95rem", color: "#6c757d" }}>
+                        No overdue follow-ups.
+                      </div>
                     ) : (
                       <>
                         <div style={{ fontSize: "0.95rem", color: "#6c757d", marginBottom: "0.4rem" }}>
@@ -1823,16 +1922,21 @@ export function UserDashboard() {
                                       <td className="fw-semibold text-primary">{row.mobile || "—"}</td>
                                       <td>{row.name || "—"}</td>
 
+                                      {/* ✅ Source: dropdown only (no textbox) */}
                                       <td>
                                         {isEditing ? (
-                                          <input
-                                            type="text"
-                                            className="form-control form-control-sm"
-                                            list="source-options"
+                                          <select
+                                            className="form-select form-select-sm"
                                             value={editRowData.source || ""}
                                             onChange={(e) => handleEditRowChange("source", e.target.value)}
-                                            placeholder="Select or type source"
-                                          />
+                                          >
+                                            <option value="">Select source</option>
+                                            {sourceOptions.map((s) => (
+                                              <option key={s} value={s}>
+                                                {s}
+                                              </option>
+                                            ))}
+                                          </select>
                                         ) : (
                                           <span className="small text-dark">{row.source || "—"}</span>
                                         )}
@@ -2045,7 +2149,11 @@ export function UserDashboard() {
                         </>
                       )}
                     </div>
-                    <button type="button" className="btn btn-outline-secondary btn-sm" onClick={closeModal}>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={closeModal}
+                    >
                       Close
                     </button>
                   </div>
@@ -2053,7 +2161,11 @@ export function UserDashboard() {
               </div>
             </div>
 
-            <div className="modal-backdrop fade show" onClick={closeModal} style={{ cursor: "pointer" }} />
+            <div
+              className="modal-backdrop fade show"
+              onClick={closeModal}
+              style={{ cursor: "pointer" }}
+            />
           </>
         )}
 
@@ -2081,7 +2193,11 @@ export function UserDashboard() {
                     </span>
                     Add New Lead
                   </h5>
-                  <button type="button" className="btn btn-link p-0 text-muted" onClick={closeAddLeadModal}>
+                  <button
+                    type="button"
+                    className="btn btn-link p-0 text-muted"
+                    onClick={closeAddLeadModal}
+                  >
                     <CircleXIcon size={22} />
                   </button>
                 </div>
@@ -2111,16 +2227,21 @@ export function UserDashboard() {
                       />
                     </div>
 
+                    {/* ✅ Source: dropdown only (no textbox) */}
                     <div className="col-12 col-sm-6">
                       <label className="text-muted mb-1">Source</label>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        list="source-options"
+                      <select
+                        className="form-select form-select-sm"
                         value={newLead.source || ""}
                         onChange={(e) => handleNewLeadChange("source", e.target.value)}
-                        placeholder="Select or type source"
-                      />
+                      >
+                        <option value="">Select source</option>
+                        {sourceOptions.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div className="col-12 col-sm-6">
