@@ -28,6 +28,12 @@ const PROJECT_OPTIONS = [
   "Godrej woods",
   "Ranka ankura",
   "Vajram vivera",
+  "Tata Varnam",
+  "TVS Emrald",
+  "Casagrand",
+  "Expat wisdom tree",
+  "Sumuk Square",
+  "Concorde Neo",
   "SLV golden towers",
 ];
 

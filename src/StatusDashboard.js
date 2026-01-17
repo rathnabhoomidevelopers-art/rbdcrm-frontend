@@ -54,12 +54,18 @@ const SOURCE_OPTIONS = [
 const PROJECT_OPTIONS = [
   "Northern Lights",
   "Gk hill view",
-  "Novera farmland",
+  "Novara farmland",
   "Konig villa homes",
   "Sattva lumino",
   "Godrej woods",
   "Ranka ankura",
   "Vajram vivera",
+  "Tata Varnam",
+  "TVS Emrald",
+  "Casagrand",
+  "Expat wisdom tree",
+  "Sumuk Square",
+  "Concorde Neo",
   "SLV golden towers",
 ];
 

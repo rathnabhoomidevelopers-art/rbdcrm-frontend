@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 
-// ✅ Default Source dropdown options (base list)
+// Default Source dropdown options (base list)
 const DEFAULT_SOURCE_OPTIONS = [
   "Google Ads",
   "Meta Ads",
@@ -39,11 +39,16 @@ const PROJECT_OPTIONS = [
   "Godrej woods",
   "Ranka ankura",
   "Vajram vivera",
+  "Tata Varnam",
+  "TVS Emrald",
+  "Casagrand",
+  "Expat wisdom tree",
+  "Sumuk Square",
+  "Concorde Neo",
   "SLV golden towers",
 ];
 
 const AUTO_24H_STATUSES = ["NR/SF", "RNR", "Details_shared", "Site Visited", "Busy"];
-// Lock only NR/SF and Busy for date edits
 const HARD_LOCK_STATUSES = ["NR/SF", "Busy"];
 
 const DASHBOARD_FOLLOWUP_STATUSES = [
